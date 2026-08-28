@@ -53,7 +53,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### HACS (custom repository)
 
 1. HACS → ⋮ → **Custom repositories**
-2. URL: `https://github.com/<you>/nspanel-cards`, category **Dashboard**
+2. URL: `https://github.com/mennovanhout/nspanel-cards`, category **Dashboard**
 3. Install, then add the resource if HACS doesn't:
    `/hacsfiles/nspanel-cards/nspanel-cards.js`, type **JavaScript module**
 
