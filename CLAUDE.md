@@ -10,8 +10,9 @@ single JavaScript file that Home Assistant loads as a module resource.
 
 Cards, in two families:
 
-- **Controls** (`NsBaseCard`): `nspanel-light-card`, `nspanel-cover-card`, `nspanel-climate-card`.
-  Gesture engine, echo window, one entity each.
+- **Controls** (`NsBaseCard`): `nspanel-light-card`, `nspanel-cover-card`,
+  `nspanel-climate-card`, `nspanel-media-card`. Gesture engine, echo window, one entity each.
+  What the drag sets differs per card: brightness, position, target temperature, volume.
 - **Information** (`NsInfoCard`): `nspanel-sensor-card`, `nspanel-sensors-card`,
   `nspanel-status-card`, `nspanel-weather-card`, `nspanel-clock-card`. Read-only, often several
   entities, tap opens more-info.
@@ -47,7 +48,8 @@ powershell -NoProfile -File dev/shots.ps1
 ```
 
 `dev/bench.html?shot=<id>` is the bare 480x480 capture mode the script drives - ids are
-`light`, `cover`, `sheet`, `climate`, `info`, `status`, `sky`, one per panel in the bench.
+`light`, `cover`, `sheet`, `climate`, `media`, `info`, `status`, `sky`, one per panel in the
+bench.
 Loading `dev/bench.html` with no query string gives the whole rack for eyeballing changes.
 
 HA's `ha-icon` does not exist outside HA, so the bench stubs it against `dev/mdi-icons.js`.
@@ -135,7 +137,7 @@ Ordered top to bottom, separated by banner comments:
 
 Miss (3) and the GUI silently drops the option from any card the user edits. `dev/editor.html`
 prints a sync check comparing (1) against (3) for **every** card - open it after touching
-options; all eight rows should say `ok`. The exempt keys are the ones `ha-form` cannot draw:
+options; all nine rows should say `ok`. The exempt keys are the ones `ha-form` cannot draw:
 `presets`, `entities`, `severity`, and the legacy `name`.
 - Comments explain *why*, in prose, at the point where the reasoning is non-obvious. Match
   that density — this file is written to be read.
@@ -162,6 +164,14 @@ Both resolve per-card defaults through `static get defaultOptions()`, and contro
 have `static get defaultPresets()`. Use them. A subclass that assigns to `this._config` after
 `super.setConfig()` is writing into a config `_build()` has already read — that is the exact
 shape of a bug this repo has shipped once already.
+
+### The one bitmap in the bundle
+
+The media card's album art is the only image this bundle decodes. Two rules hold it in place:
+a fixed 76px box, and `src` assigned **only when the URL changes**. A render happens on every
+volume frame, and reassigning an identical `src` makes the browser decode the image again —
+which is exactly the kind of thing a Mali-G31 cannot absorb. `_artShown` is what guards it; if
+you touch `_render` there, keep that guard.
 
 ### `hidden` needs the CSS rule
 

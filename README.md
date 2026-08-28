@@ -33,6 +33,7 @@ the constraint.
 | `custom:nspanel-light-card` | Brightness. Drag anywhere, tap to toggle, long-press for the full-screen control. |
 | `custom:nspanel-cover-card` | Blind/cover position. Same gestures; a tap while it is moving **stops** it. |
 | `custom:nspanel-climate-card` | Target temperature. Drag to set it, long-press for HVAC modes. Tap opens more-info rather than toggling — turning the heating off by brushing past the panel is a bad afternoon. |
+| `custom:nspanel-media-card` | Media player. Drag for volume, tap to play/pause, transport buttons on the face. |
 
 **Information** — read-only, tap opens Home Assistant's own more-info dialog:
 
@@ -89,7 +90,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.3.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.4.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -201,6 +202,56 @@ or any combination.
 
 The strip under the card in that picture is a `nspanel-sensors-card`; the whole page is
 in [the panel view example](#a-full-480480-panel-view) below.
+
+### Media
+
+<table>
+<tr>
+<td valign="top">
+
+```yaml
+type: custom:nspanel-media-card
+entity: media_player.kitchen
+title: Kitchen
+height: 300
+presets:
+  - name: Radio 4
+    source: BBC Radio 4
+  - name: Jazz
+    source: Jazz24
+  - name: Quiet
+    volume_pct: 15
+```
+
+</td>
+<td><img src="docs/images/media.png" alt="A media card showing album art, a track title and artist, transport buttons and three favourite buttons, with the volume at 34 percent" width="300"></td>
+</tr>
+</table>
+
+The card fill is **volume**, so the drag gesture that dims a light sets the volume here, and
+the long-press sheet gives you an absolute slider with the same transport buttons. Tap is
+play/pause; set `more_info: true` if you would rather it opened the dialog.
+
+Presets on this card are **favourites**, not levels. Each takes a `source` (calls
+`select_source`), a `media_content_id` with optional `media_content_type` (calls `play_media`),
+a `volume_pct`, or a combination. There are none by default — the transport row is what most
+panels want, and showing both rows needs about 300px.
+
+Buttons grey themselves out when the player does not advertise the feature, and the whole card
+degrades quietly: no `VOLUME_SET` and the fill still tracks your finger, it just does not send
+anything.
+
+Album art is the one thing in this bundle that decodes a bitmap. It is held to a fixed 76px
+box, and the `src` is only assigned when the URL actually changes — reassigning the same `src`
+makes the browser decode it again, and on a media card a render happens on every volume tick.
+`show_art: false` drops it for the domain icon.
+
+| Option | Default | |
+| --- | --- | --- |
+| `show_art` | `true` | album art, else the domain icon |
+| `show_transport` | `true` | previous / play-pause / next |
+| `more_info` | `false` | `true` makes tap open the dialog instead of play/pause |
+| `presets` | none | favourites: `source`, `media_content_id`, `volume_pct` |
 
 ### Sensor
 

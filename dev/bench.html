@@ -61,6 +61,10 @@
     <div class="cap">Climate</div>
   </div>
   <div>
+    <div class="panel" id="p-media"><div class="stack" id="s-media"></div></div>
+    <div class="cap">Media</div>
+  </div>
+  <div>
     <div class="panel" id="p-info"><div class="stack" id="s-info"></div></div>
     <div class="cap">Sensors</div>
   </div>
@@ -183,6 +187,19 @@ const hass = {
             temperature: 13, templow: 4 },
         ] }),
 
+    'media_player.kitchen': st('media_player.kitchen', 'playing',
+      { friendly_name: 'Sonos Kitchen', volume_level: 0.34,
+        media_title: 'Sunlight Through Glass', media_artist: 'Hale & Ivor',
+        media_album_name: 'Long Afternoons',
+        // an abstract placeholder, not the artwork of any real release
+        entity_picture: 'data:image/svg+xml;utf8,' + encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160">' +
+          '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#f0a03c"/>' +
+          '</linearGradient></defs><rect width="160" height="160" fill="url(#g)"/>' +
+          '<circle cx="112" cy="48" r="26" fill="rgba(255,255,255,.35)"/></svg>'),
+        supported_features: 1 | 4 | 16 | 32 | 4096 | 16384 }),
+
     'calendar.family': st('calendar.family', 'on',
       { friendly_name: 'Family', message: 'Bin day · 07:30' }),
   },
@@ -262,6 +279,24 @@ card('nspanel-sensors-card', {
     { entity: 'sensor.wind', name: 'Wind' },
   ],
 }, document.getElementById('s-climate'));
+
+card('nspanel-media-card', {
+  entity: 'media_player.kitchen', title: 'Kitchen', height: 300,
+  presets: [
+    { name: 'Radio 4', source: 'BBC Radio 4' },
+    { name: 'Jazz', source: 'Jazz24' },
+    { name: 'Quiet', volume_pct: 15 },
+  ],
+}, document.getElementById('s-media'));
+
+card('nspanel-sensors-card', {
+  title: 'Outside', height: 144,
+  entities: [
+    { entity: 'sensor.outside_temp', name: 'Outside' },
+    { entity: 'sensor.outside_hum', name: 'Humidity' },
+    { entity: 'sensor.wind', name: 'Wind' },
+  ],
+}, document.getElementById('s-media'));
 
 /* two sensor cards: one with a range bar and severity, one with a second line */
 card('nspanel-sensor-card', {

@@ -5,6 +5,7 @@
  *   custom:nspanel-light-card    brightness, drag anywhere, long-press for more
  *   custom:nspanel-cover-card    position, drag anywhere, long-press for more
  *   custom:nspanel-climate-card  target temperature, same gestures, modes in the sheet
+ *   custom:nspanel-media-card    volume on the drag, transport on the face
  *   custom:nspanel-sensor-card   one reading, large
  *   custom:nspanel-sensors-card  two to four readings side by side
  *   custom:nspanel-status-card   doors/windows/locks; quiet unless something is wrong
@@ -39,7 +40,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.3.0';
+const NSPANEL_VERSION = '0.4.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2098,6 +2099,325 @@ class NsPanelClimateCard extends NsBaseCard {
 }
 
 /* ================================================================== *
+ * Media card
+ *
+ * A control card, because the gesture that matters on a media player is
+ * volume and that is exactly what NsBaseCard's drag does: drag anywhere for
+ * volume, tap for play/pause, long-press for the sheet. Transport buttons sit
+ * on the face with the same 56px hitboxes as the preset chips.
+ *
+ * Album art is the one thing in this bundle that decodes a bitmap, so it is
+ * kept to a fixed 76px box and - this is the part that matters on a PX30 -
+ * the src is only assigned when the URL actually changes. Assigning the same
+ * src on every render makes the browser re-decode, and a render happens on
+ * every volume tick.
+ * ================================================================== */
+
+/* media_player supported_features */
+const MP_PAUSE = 1;
+const MP_VOLUME_SET = 4;
+const MP_PREV = 16;
+const MP_NEXT = 32;
+const MP_TURN_OFF = 256;
+const MP_STOP = 4096;
+const MP_PLAY = 16384;
+
+const MEDIA_CSS = `
+.art {
+  width: 76px;
+  height: 76px;
+  border-radius: 14px;
+  overflow: hidden;
+  flex: none;
+  background: rgba(255,255,255,.10);
+}
+.art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.chip ha-icon { --mdc-icon-size: 26px; }
+.chip[disabled] { opacity: .35; }
+/* The other cards let the fill tint show through their chips, because their
+   fill sits below the row. Volume puts the boundary at an arbitrary height,
+   and a translucent button cut in half by it reads as a rendering fault - so
+   these are opaque. The second selector matches BASE_CSS's specificity for
+   the off state and wins on order. */
+.chip, .card:not(.on) .chip { background: var(--ns-surface-2); }
+`;
+
+class NsPanelMediaCard extends NsBaseCard {
+  static get cardType() { return 'nspanel-media-card'; }
+  static get domain() { return 'media_player'; }
+  static get accent() { return '#a78bfa'; }
+  static get defaultOptions() {
+    return { show_art: true, show_transport: true, more_info: false };
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('media_player.') === 0)
+      : null;
+    return { entity: found || 'media_player.example', height: 220 };
+  }
+
+  /* Favourites rather than levels: a preset takes `source`, or a
+     media_content_id/type pair, or a volume. None by default - the transport
+     row is what most panels want, and both rows need a 300px card. */
+  static get defaultPresets() { return []; }
+
+  _supports(bit) {
+    const s = this._stateObj;
+    const f = s && s.attributes ? (s.attributes.supported_features || 0) : 0;
+    return (f & bit) !== 0;
+  }
+
+  _playing() {
+    const s = this._stateObj;
+    return !!s && s.state === 'playing';
+  }
+
+  _idle() {
+    const s = this._stateObj;
+    return !s || s.state === 'off' || s.state === 'idle' || s.state === 'standby';
+  }
+
+  _entityValue() {
+    const s = this._stateObj;
+    const v = s && s.attributes ? s.attributes.volume_level : null;
+    return typeof v === 'number' ? clamp(v, 0, 1) : 0;
+  }
+
+  _commit(v) {
+    // Without VOLUME_SET there is nothing to commit to; the drag still moves
+    // the fill under the finger, it just does not go anywhere.
+    if (!this._supports(MP_VOLUME_SET)) return;
+    this._call('media_player', 'volume_set', { volume_level: Math.round(v * 100) / 100 });
+  }
+
+  _onTap() {
+    if (this._config.more_info) { moreInfo(this, this._config.entity); return; }
+    this._call('media_player', 'media_play_pause');
+  }
+
+  _applyPreset(p) {
+    this._haptic('light');
+    if (p.source) this._call('media_player', 'select_source', { source: p.source });
+    if (p.media_content_id) {
+      this._call('media_player', 'play_media', {
+        media_content_id: p.media_content_id,
+        media_content_type: p.media_content_type || 'music',
+      });
+    }
+    if (typeof p.volume_pct === 'number') {
+      const v = clamp(p.volume_pct / 100, 0, 1);
+      this._call('media_player', 'volume_set', { volume_level: v });
+      this._local = v;
+      this._localUntil = Date.now() + this._config.echo_ms;
+      this._scheduleRender();
+    }
+  }
+
+  /* What the card says it is playing. media_title if there is one, otherwise
+     the device, so the card never reads as blank. */
+  _lines() {
+    const s = this._stateObj;
+    const a = (s && s.attributes) || {};
+    const device = this._title();
+    if (isBroken(s)) return { top: device, sub: 'Unavailable' };
+    if (this._idle()) {
+      return { top: device, sub: s && s.state === 'off' ? 'Off' : 'Nothing playing' };
+    }
+    const top = a.media_title || device;
+    const sub = a.media_artist || a.media_series_title || a.media_channel ||
+      a.media_album_name || (a.media_title ? device : (s.state === 'paused' ? 'Paused' : 'Playing'));
+    return { top, sub: s.state === 'paused' ? `Paused · ${sub}` : sub };
+  }
+
+  _defaultIcon() {
+    const s = this._stateObj;
+    const cls = s && s.attributes ? s.attributes.device_class : null;
+    if (cls === 'tv') return 'mdi:television';
+    if (cls === 'receiver') return 'mdi:speaker';
+    return 'mdi:music';
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    const cfg = this._config;
+    const tint = tintStops(this._accent());
+    this.shadowRoot.innerHTML = `
+      <style>${BASE_CSS}${MEDIA_CSS}</style>
+      <div class="card" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+        --ns-fill-strong:${tint.strong};--ns-fill-weak:${tint.weak}">
+        <div class="fillwrap"><div class="fill"></div></div>
+        <div class="badge" hidden>Offline</div>
+        <div class="content">
+          <div class="row">
+            <div class="art" hidden><img alt=""></div>
+            <div class="icon"><ha-icon></ha-icon></div>
+            <div class="value"></div>
+          </div>
+          <div>
+            <div class="name"></div>
+            <div class="sub"></div>
+            <div class="presets transport" hidden></div>
+            <div class="presets favourites" hidden></div>
+          </div>
+        </div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._elArt = this.shadowRoot.querySelector('.art');
+    this._elImg = this.shadowRoot.querySelector('.art img');
+    this._elIconBox = this.shadowRoot.querySelector('.icon');
+    this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
+    this._elValue = this.shadowRoot.querySelector('.value');
+    this._elName = this.shadowRoot.querySelector('.name');
+    this._elSub = this.shadowRoot.querySelector('.sub');
+    this._elBadge = this.shadowRoot.querySelector('.badge');
+    this._elTransport = this.shadowRoot.querySelector('.transport');
+    this._elFavourites = this.shadowRoot.querySelector('.favourites');
+
+    if (cfg.show_transport) {
+      this._elTransport.hidden = false;
+      this._buttons = [
+        { key: 'prev', icon: 'mdi:skip-previous', bit: MP_PREV,
+          run: () => this._call('media_player', 'media_previous_track') },
+        { key: 'play', icon: 'mdi:play', bit: MP_PLAY | MP_PAUSE,
+          run: () => this._call('media_player', 'media_play_pause') },
+        { key: 'next', icon: 'mdi:skip-next', bit: MP_NEXT,
+          run: () => this._call('media_player', 'media_next_track') },
+      ].map((b) => {
+        const el = document.createElement('button');
+        el.className = 'chip';
+        el.innerHTML = `<ha-icon icon="${b.icon}"></ha-icon>`;
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (el.hasAttribute('disabled')) return;
+          this._haptic('light');
+          b.run();
+        });
+        this._elTransport.appendChild(el);
+        return { def: b, el, icon: el.querySelector('ha-icon') };
+      });
+    }
+
+    if (cfg.show_presets && cfg.presets.length) {
+      this._elFavourites.hidden = false;
+      cfg.presets.slice(0, 4).forEach((p) => {
+        const b = document.createElement('button');
+        b.className = 'chip';
+        b.textContent = p.name;
+        b.addEventListener('click', (e) => { e.stopPropagation(); this._applyPreset(p); });
+        this._elFavourites.appendChild(b);
+      });
+    }
+
+    this._bindGestures(this._card);
+  }
+
+  _openSheet() {
+    const s = this._stateObj;
+    const acts = [];
+    if (this._supports(MP_PREV)) {
+      acts.push({ label: 'Previous', icon: 'mdi:skip-previous',
+        close: false, run: () => this._call('media_player', 'media_previous_track') });
+    }
+    acts.push({
+      label: this._playing() ? 'Pause' : 'Play',
+      icon: this._playing() ? 'mdi:pause' : 'mdi:play',
+      primary: true,
+      close: false,
+      run: () => this._call('media_player', 'media_play_pause'),
+    });
+    if (this._supports(MP_NEXT)) {
+      acts.push({ label: 'Next', icon: 'mdi:skip-next',
+        close: false, run: () => this._call('media_player', 'media_next_track') });
+    }
+    if (this._supports(MP_STOP)) {
+      acts.push({ label: 'Stop', icon: 'mdi:stop',
+        run: () => this._call('media_player', 'media_stop') });
+    } else if (this._supports(MP_TURN_OFF)) {
+      acts.push({ label: 'Off', icon: 'mdi:power',
+        run: () => this._call('media_player', 'turn_off') });
+    }
+
+    const lines = this._lines();
+    sheet().open({
+      title: lines.top,
+      state: lines.sub,
+      value: this._displayValue(),
+      accent: this._accent(),
+      step: this._config.step,
+      actions: acts.slice(0, 4),
+      onInput: (v) => {
+        this._local = v;
+        this._localUntil = Date.now() + this._config.echo_ms;
+        this._scheduleRender();
+      },
+      onCommit: (v) => this._commit(v),
+    });
+  }
+
+  _render() {
+    if (!this._card) return;
+    const cfg = this._config;
+    const s = this._stateObj;
+    const broken = isBroken(s);
+    const a = (s && s.attributes) || {};
+    const idle = this._idle();
+    const v = this._displayValue();
+    const pct = Math.round(v * 100);
+
+    this._card.classList.toggle('unavailable', broken);
+    this._card.classList.toggle('on', !idle && !broken);
+    this._elBadge.hidden = !broken;
+
+    this._card.style.setProperty('--ns-fill', String(broken ? 0 : v));
+    this._card.style.setProperty('--ns-fill-opacity', broken || idle ? '0' : '1');
+
+    // Only touch src when the URL changes: same src reassigned is a re-decode,
+    // and this runs on every volume frame.
+    const art = cfg.show_art && !broken ? (a.entity_picture || null) : null;
+    if (art !== this._artShown) {
+      this._artShown = art;
+      if (art) this._elImg.setAttribute('src', art);
+      else this._elImg.removeAttribute('src');
+      this._elArt.hidden = !art;
+      this._elIconBox.hidden = !!art;
+    }
+    if (!art) {
+      this._elIcon.setAttribute('icon', cfg.icon || a.icon || this._defaultIcon());
+    }
+
+    const lines = this._lines();
+    const stamp = `${lines.top}|${lines.sub}|${pct}|${idle}|${broken}`;
+    if (this._shown !== stamp) {
+      this._shown = stamp;
+      this._elValue.innerHTML = broken || idle || typeof a.volume_level !== 'number'
+        ? '' : `${pct}<small>%</small>`;
+      this._elName.textContent = lines.top;
+      this._elSub.textContent = lines.sub;
+    }
+
+    if (this._buttons) {
+      const playing = this._playing();
+      this._buttons.forEach((b) => {
+        const on = broken ? false : (b.def.bit === (MP_PLAY | MP_PAUSE)
+          ? true : this._supports(b.def.bit));
+        if (on) b.el.removeAttribute('disabled'); else b.el.setAttribute('disabled', '');
+        if (b.def.key === 'play') {
+          b.icon.setAttribute('icon', playing ? 'mdi:pause' : 'mdi:play');
+        }
+      });
+    }
+  }
+}
+
+/* ================================================================== *
  * Weather card
  *
  * Current conditions come off the entity. The forecast does not: since HA
@@ -2551,6 +2871,8 @@ const EDITOR_LABELS = {
   hour_24: '24-hour clock',
   show_date: 'Show the date',
   show_seconds: 'Show seconds',
+  show_art: 'Show album art',
+  show_transport: 'Show transport buttons',
 };
 
 /* The options every card takes. The entity row is prepended per card, because
@@ -2770,6 +3092,18 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'more_info', selector: { boolean: {} } },
 ]);
 
+/* The media card is a control card, minus the options that make no sense for
+   one: there are no levels to preset by dragging, and no ± step worth a row. */
+const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'show_art', selector: { boolean: {} } },
+      { name: 'show_transport', selector: { boolean: {} } },
+      { name: 'more_info', selector: { boolean: {} } },
+    ],
+  },
+]);
+
 const LIST_NOTE = 'Entities are a list, which this form cannot draw. Edit them in ' +
   'YAML - the GUI leaves them alone.';
 
@@ -2777,6 +3111,16 @@ class NsPanelClimateCardEditor extends NsBaseCardEditor {
   static get cardType() { return 'nspanel-climate-card'; }
   static get domain() { return 'climate'; }
   static get rows() { return CLIMATE_SCHEMA; }
+}
+
+class NsPanelMediaCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-media-card'; }
+  static get domain() { return 'media_player'; }
+  static get rows() { return MEDIA_SCHEMA; }
+  static get note() {
+    return 'Presets on this card are favourites - a source, or a media id to play. ' +
+      'They are a list, so edit them in YAML; the GUI leaves them alone.';
+  }
 }
 
 class NsPanelSensorCardEditor extends NsBaseCardEditor {
@@ -2830,6 +3174,7 @@ customElements.define('nspanel-light-card', NsPanelLightCard);
 customElements.define('nspanel-cover-card', NsPanelCoverCard);
 customElements.define('nspanel-probe-card', NsPanelProbeCard);
 customElements.define('nspanel-climate-card', NsPanelClimateCard);
+customElements.define('nspanel-media-card', NsPanelMediaCard);
 customElements.define('nspanel-sensor-card', NsPanelSensorCard);
 customElements.define('nspanel-sensors-card', NsPanelSensorsCard);
 customElements.define('nspanel-status-card', NsPanelStatusCard);
@@ -2839,6 +3184,7 @@ customElements.define('nspanel-clock-card', NsPanelClockCard);
 customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
 customElements.define('nspanel-cover-card-editor', NsPanelCoverCardEditor);
 customElements.define('nspanel-climate-card-editor', NsPanelClimateCardEditor);
+customElements.define('nspanel-media-card-editor', NsPanelMediaCardEditor);
 customElements.define('nspanel-sensor-card-editor', NsPanelSensorCardEditor);
 customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
 customElements.define('nspanel-status-card-editor', NsPanelStatusCardEditor);
@@ -2863,6 +3209,12 @@ window.customCards.push(
     type: 'nspanel-climate-card',
     name: 'NSPanel Climate',
     description: 'Thermostat for the NSPanel Pro 86. Drag to set the target, long-press for modes.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-media-card',
+    name: 'NSPanel Media',
+    description: 'Media player for the NSPanel Pro 86. Drag for volume, tap to play or pause.',
     preview: true,
   },
   {
@@ -2913,6 +3265,7 @@ window.NsPanelCards = {
   NsPanelCoverCard,
   NsPanelProbeCard,
   NsPanelClimateCard,
+  NsPanelMediaCard,
   NsPanelSensorCard,
   NsPanelSensorsCard,
   NsPanelStatusCard,
@@ -2922,6 +3275,7 @@ window.NsPanelCards = {
   NsPanelLightCardEditor,
   NsPanelCoverCardEditor,
   NsPanelClimateCardEditor,
+  NsPanelMediaCardEditor,
   NsPanelSensorCardEditor,
   NsPanelSensorsCardEditor,
   NsPanelStatusCardEditor,
