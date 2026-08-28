@@ -4,6 +4,12 @@
  * Cards in this bundle:
  *   custom:nspanel-light-card    brightness, drag anywhere, long-press for more
  *   custom:nspanel-cover-card    position, drag anywhere, long-press for more
+ *   custom:nspanel-climate-card  target temperature, same gestures, modes in the sheet
+ *   custom:nspanel-sensor-card   one reading, large
+ *   custom:nspanel-sensors-card  two to four readings side by side
+ *   custom:nspanel-status-card   doors/windows/locks; quiet unless something is wrong
+ *   custom:nspanel-weather-card  current conditions and a short forecast
+ *   custom:nspanel-clock-card    time, date, and an optional line from any entity
  *   custom:nspanel-probe-card    diagnostics - viewport, WebView, CSS support
  *
  * Why this exists: HA's stock sliders and the usual card packs are built for
@@ -33,7 +39,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.2.0';
+const NSPANEL_VERSION = '0.3.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -109,6 +115,10 @@ const BASE_CSS = `
   display: block;
 }
 * { box-sizing: border-box; }
+/* Every block below sets display, and a class rule outranks the UA sheet's
+   [hidden] { display: none } - so without this, setting .hidden on a flex
+   element does nothing at all. */
+[hidden] { display: none !important; }
 .card {
   position: relative;
   display: block;
@@ -597,7 +607,7 @@ class NsBaseCard extends HTMLElement {
       swipe_safe: true,        // release horizontal drags back to the page
       show_presets: true,
       long_press: 'sheet',
-    }, config);
+    }, this.constructor.defaultOptions, config);
     // Presets have to be settled here, not in a subclass after super() returns:
     // _build() below reads them, so a config without a `presets` key - which is
     // what getStubConfig and the GUI editor both hand over - used to throw.
@@ -628,8 +638,10 @@ class NsBaseCard extends HTMLElement {
   static getConfigElement() { return document.createElement(this.cardType + '-editor'); }
 
   /* Overridden per card; the base has none so the subclass list is the only
-     place a card's own defaults live. */
+     place a card's own defaults live. Same rule as defaultPresets: a card
+     cannot set these after super.setConfig(), because _build() has run. */
   static get defaultPresets() { return []; }
+  static get defaultOptions() { return {}; }
 
   getCardSize() { return Math.max(2, Math.round(this._config.height / 50)); }
   getLayoutOptions() { return { grid_rows: this.getCardSize(), grid_columns: 6 }; }
@@ -1162,6 +1174,1232 @@ class NsPanelCoverCard extends NsBaseCard {
 }
 
 /* ================================================================== *
+ * Info cards - read-only, and deliberately not NsBaseCard
+ *
+ * A control card carries a gesture engine, a local-value echo window and a
+ * hass diff pinned to one entity. A sensor card needs none of that and often
+ * watches several entities at once, so it gets its own smaller base rather
+ * than inheriting machinery it would have to switch off.
+ *
+ * What it does share: the diff (widened to a list), the rAF-coalesced render,
+ * build-once DOM, and BASE_CSS.
+ * ================================================================== */
+
+const INFO_CSS = `
+.card.info { cursor: default; }
+
+/* one number, read from across the room */
+.big {
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.big small { font-size: 26px; font-weight: 600; opacity: .7; margin-left: 3px; }
+
+/* a row of 2-4 readings */
+.strip { display: flex; gap: 10px; height: 100%; align-items: stretch; pointer-events: auto; }
+.cell {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255,255,255,.06);
+  border-radius: 16px;
+  padding: 12px 10px;
+  cursor: pointer;
+}
+.cell ha-icon { --mdc-icon-size: 22px; color: var(--ns-muted); }
+.cell .cv {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cell .cv small { font-size: 15px; font-weight: 600; opacity: .65; margin-left: 1px; }
+.cell .cl {
+  font-size: 13px;
+  color: var(--ns-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the status grid */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-content: flex-start;
+  overflow: hidden;
+  pointer-events: auto;
+}
+.tile {
+  flex: 1 1 calc(50% - 5px);
+  min-width: 0;
+  height: 62px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255,255,255,.06);
+  color: var(--ns-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform .1s ease-out;
+}
+.tile:active { transform: scale(.97); }
+.tile.wide { flex-basis: 100%; }
+.tile.alert { background: var(--ns-accent-dim); }
+.tile ha-icon { --mdc-icon-size: 24px; color: var(--ns-muted); flex: none; }
+.tile.alert ha-icon { color: var(--ns-accent); }
+.tile .tt { min-width: 0; }
+.tile .tn {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile .ts {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ns-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile.alert .ts { color: var(--ns-accent); }
+
+/* nothing is wrong, and that is the whole message */
+.clear {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--ns-muted);
+}
+.clear ha-icon { --mdc-icon-size: 44px; color: var(--ns-accent); }
+.clear div { font-size: 18px; font-weight: 600; }
+
+/* clock */
+.clock-t {
+  font-size: 88px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.clock-t small { font-size: 34px; font-weight: 600; opacity: .55; margin-left: 4px; }
+.clock-d { font-size: 20px; font-weight: 600; color: var(--ns-muted); margin-top: 10px; }
+
+/* weather forecast strip */
+.fc { display: flex; gap: 8px; margin-top: 14px; }
+.fc .d {
+  flex: 1 1 0;
+  min-width: 0;
+  background: rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 8px 2px 10px;
+  text-align: center;
+}
+.fc .dd { font-size: 12px; color: var(--ns-muted); }
+.fc ha-icon { --mdc-icon-size: 22px; margin: 2px 0; }
+.fc .dt { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fc .dt span { font-weight: 500; opacity: .55; margin-left: 2px; }
+`;
+
+/* Icons by device_class, so a sensor card with no icon still looks like the
+   thing it measures. */
+const CLASS_ICONS = {
+  temperature: 'mdi:thermometer',
+  humidity: 'mdi:water-percent',
+  pressure: 'mdi:gauge',
+  power: 'mdi:flash',
+  energy: 'mdi:lightning-bolt',
+  battery: 'mdi:battery',
+  illuminance: 'mdi:brightness-5',
+  carbon_dioxide: 'mdi:molecule-co2',
+  wind_speed: 'mdi:weather-windy',
+  moisture: 'mdi:water-alert',
+  door: 'mdi:door-open',
+  window: 'mdi:window-open',
+  garage_door: 'mdi:garage-open',
+  motion: 'mdi:motion-sensor',
+  smoke: 'mdi:smoke-detector',
+  problem: 'mdi:alert',
+  occupancy: 'mdi:account',
+};
+
+function deviceClass(stateObj) {
+  return (stateObj && stateObj.attributes && stateObj.attributes.device_class) || null;
+}
+
+/* Openable things get an icon per state - a door-open glyph next to the word
+   "Closed" is the kind of detail that makes a panel feel wrong at a glance. */
+const STATE_ICONS = {
+  door: ['mdi:door-closed', 'mdi:door-open'],
+  window: ['mdi:window-closed', 'mdi:window-open'],
+  garage_door: ['mdi:garage', 'mdi:garage-open'],
+  opening: ['mdi:door-closed', 'mdi:door-open'],
+  motion: ['mdi:motion-sensor-off', 'mdi:motion-sensor'],
+};
+
+function classIcon(stateObj, entityId) {
+  const c = deviceClass(stateObj);
+  const state = stateObj ? stateObj.state : '';
+  const open = state === 'on' || state === 'open' || state === 'opening';
+  if (c && STATE_ICONS[c]) return STATE_ICONS[c][open ? 1 : 0];
+  if (c && CLASS_ICONS[c]) return CLASS_ICONS[c];
+  const domain = entityId ? entityId.split('.')[0] : '';
+  if (domain === 'lock') return state === 'locked' ? 'mdi:lock' : 'mdi:lock-open';
+  if (domain === 'cover') {
+    return c === 'garage' || c === 'garage_door'
+      ? (open ? 'mdi:garage-open' : 'mdi:garage')
+      : 'mdi:window-shutter';
+  }
+  if (domain === 'person' || domain === 'device_tracker') return 'mdi:account';
+  return 'mdi:eye-outline';
+}
+
+/* A number if the state is one, otherwise null - which is the difference
+   between "22.4" and "unavailable" everywhere below. */
+function numeric(stateObj) {
+  if (!stateObj) return null;
+  const n = parseFloat(stateObj.state);
+  return isNaN(n) ? null : n;
+}
+
+function unitOf(stateObj) {
+  return (stateObj && stateObj.attributes &&
+    stateObj.attributes.unit_of_measurement) || '';
+}
+
+/* Round for display. Default: one decimal below 100, none above, because
+   three decimals of humidity is noise at arm's length. */
+function fmt(n, decimals) {
+  if (n === null || n === undefined) return '—';
+  const d = decimals === null || decimals === undefined
+    ? (Math.abs(n) >= 100 || Math.round(n) === n ? 0 : 1)
+    : decimals;
+  return n.toFixed(d);
+}
+
+function moreInfo(node, entityId) {
+  fireEvent(node, 'hass-more-info', { entityId });
+}
+
+class NsInfoCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._built = false;
+    this._raf = null;
+  }
+
+  /* Cards that need an entity say so; the clock does not. */
+  static get requiresEntity() { return true; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() { return {}; }
+  static getConfigElement() { return document.createElement(this.cardType + '-editor'); }
+
+  setConfig(config) {
+    if (this.constructor.requiresEntity && (!config || !config.entity)) {
+      throw new Error(`${this.constructor.cardType}: an "entity" is required`);
+    }
+    this._config = Object.assign({
+      title: null,
+      name: null,
+      icon: null,
+      height: 200,
+      accent: null,
+      more_info: true,
+    }, this.constructor.defaultOptions, config || {});
+    this._built = false;
+    this._teardown();
+    if (this.shadowRoot) this._build();
+    if (this._hass) this._sync();
+  }
+
+  /* Every entity this card draws. The base diff walks the list, so a card that
+     reads several entities overrides this and not the diff itself. */
+  _entityIds() {
+    return this._config && this._config.entity ? [this._config.entity] : [];
+  }
+
+  set hass(hass) {
+    const prev = this._hass;
+    this._hass = hass;
+    if (!this._config) return;
+    this._afterHass(prev);
+    if (prev) {
+      const ids = this._entityIds();
+      let changed = false;
+      for (let i = 0; i < ids.length; i++) {
+        if (prev.states[ids[i]] !== hass.states[ids[i]]) { changed = true; break; }
+      }
+      if (!changed) return;
+    }
+    this._sync();
+  }
+
+  get hass() { return this._hass; }
+
+  /* For cards that want the connection rather than the states - the weather
+     forecast subscription. Runs on every hass, changed entities or not. */
+  _afterHass() {}
+
+  getCardSize() { return Math.max(2, Math.round(this._config.height / 50)); }
+  getLayoutOptions() { return { grid_rows: this.getCardSize(), grid_columns: 6 }; }
+
+  connectedCallback() { this._build(); if (this._hass) this._sync(); }
+  disconnectedCallback() { this._teardown(); }
+
+  /* Timers and subscriptions are released here, so no card leaks one. */
+  _teardown() {}
+
+  get _stateObj() {
+    return this._hass && this._config ? this._hass.states[this._config.entity] : null;
+  }
+
+  _state(id) { return this._hass ? this._hass.states[id] : null; }
+
+  _accent() { return this._config.accent || this.constructor.accent; }
+
+  _title() {
+    const s = this._stateObj;
+    return this._config.title || this._config.name ||
+      friendly(s, this._config && this._config.entity);
+  }
+
+  _scheduleRender() {
+    if (this._raf !== null) return;
+    this._raf = requestAnimationFrame(() => {
+      this._raf = null;
+      this._render();
+    });
+  }
+
+  _sync() { this._scheduleRender(); }
+
+  /* Tap on a read-only card opens HA's own more-info dialog, which is where
+     history and settings already live. Nothing worth reimplementing. */
+  _bindMoreInfo(surface, entityIdFn) {
+    surface.addEventListener('click', () => {
+      if (!this._config.more_info) return;
+      const id = entityIdFn ? entityIdFn() : this._config.entity;
+      if (id) moreInfo(this, id);
+    });
+  }
+
+  /* The opening of every info card's shadow DOM: tokens, height, accent. */
+  _shell(extraClass) {
+    const tint = tintStops(this._accent());
+    return `
+      <style>${BASE_CSS}${INFO_CSS}</style>
+      <div class="card info ${extraClass || ''}"
+        style="--ns-height:${this._config.height}px;--ns-accent:${this._accent()};
+          --ns-accent-dim:${tint.weak};
+          --ns-fill-strong:${tint.strong};--ns-fill-weak:${tint.weak}">
+    `;
+  }
+}
+
+/* ================================================================== *
+ * Sensor card - one reading, as large as the card allows
+ * ================================================================== */
+
+class NsPanelSensorCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-sensor-card'; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() {
+    return {
+      decimals: null, unit: null, min: null, max: null, bar: null,
+      severity: null, secondary: null,
+    };
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('sensor.') === 0)
+      : null;
+    return { entity: found || 'sensor.example', height: 160 };
+  }
+
+  _entityIds() {
+    const ids = [this._config.entity];
+    if (this._config.secondary) ids.push(this._config.secondary);
+    return ids;
+  }
+
+  /* A bar needs both ends of a range; asking for one without them is a config
+     mistake worth ignoring rather than crashing over. */
+  _hasBar() {
+    const c = this._config;
+    if (c.bar === false) return false;
+    return typeof c.min === 'number' && typeof c.max === 'number';
+  }
+
+  /* severity: [{above: 800, color: '#f87171'}, ...]. Last match wins, so the
+     list reads top to bottom the way a person would say it. */
+  _severityColour(n) {
+    const list = this._config.severity;
+    if (!Array.isArray(list) || n === null) return null;
+    let hit = null;
+    list.forEach((s) => {
+      if (typeof s.above === 'number' && n > s.above) hit = s.color || s.colour || null;
+    });
+    return hit;
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="fillwrap"><div class="fill"></div></div>
+        <div class="badge" hidden>Offline</div>
+        <div class="content">
+          <div class="row"><div class="icon"><ha-icon></ha-icon></div></div>
+          <div>
+            <div class="big"></div>
+            <div class="name"></div>
+            <div class="sub"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._elIcon = this.shadowRoot.querySelector('ha-icon');
+    this._elValue = this.shadowRoot.querySelector('.big');
+    this._elName = this.shadowRoot.querySelector('.name');
+    this._elSub = this.shadowRoot.querySelector('.sub');
+    this._elBadge = this.shadowRoot.querySelector('.badge');
+    if (!this._hasBar()) this.shadowRoot.querySelector('.fillwrap').hidden = true;
+    this._bindMoreInfo(this._card);
+  }
+
+  _render() {
+    if (!this._card) return;
+    const cfg = this._config;
+    const s = this._stateObj;
+    const broken = isBroken(s);
+    const n = numeric(s);
+
+    this._card.classList.toggle('unavailable', broken);
+    this._elBadge.hidden = !broken;
+
+    const sev = this._severityColour(n);
+    if (sev !== this._sevShown) {
+      this._sevShown = sev;
+      const accent = sev || this._accent();
+      const tint = tintStops(accent);
+      this._card.style.setProperty('--ns-accent', accent);
+      this._card.style.setProperty('--ns-fill-strong', tint.strong);
+      this._card.style.setProperty('--ns-fill-weak', tint.weak);
+    }
+
+    if (this._hasBar()) {
+      const v = clamp((n - cfg.min) / (cfg.max - cfg.min), 0, 1);
+      this._card.style.setProperty('--ns-fill', String(broken || n === null ? 0 : v));
+      this._card.style.setProperty('--ns-fill-opacity', broken || n === null ? '0' : '1');
+    }
+
+    this._elIcon.setAttribute('icon',
+      cfg.icon || (s && s.attributes.icon) || classIcon(s, cfg.entity));
+    this._elName.textContent = this._title();
+
+    const unit = cfg.unit === null || cfg.unit === undefined ? unitOf(s) : cfg.unit;
+    const text = broken ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, cfg.decimals));
+    const stamp = text + '|' + unit;
+    if (this._textShown !== stamp) {
+      this._textShown = stamp;
+      this._elValue.innerHTML = unit && !broken ? `${text}<small>${unit}</small>` : text;
+    }
+
+    const sec = cfg.secondary ? this._state(cfg.secondary) : null;
+    const subText = broken ? 'Unavailable'
+      : (sec ? `${friendly(sec, cfg.secondary)} ${fmt(numeric(sec), null)}${unitOf(sec)}` : '');
+    if (this._subShown !== subText) {
+      this._subShown = subText;
+      this._elSub.textContent = subText;
+      this._elSub.hidden = !subText;
+    }
+  }
+}
+
+/* ================================================================== *
+ * Sensors card - two to four readings side by side
+ *
+ * The density card. Four separate sensor cards do not fit a 480px page; one
+ * of these does, without shrinking any of the numbers below legible.
+ * ================================================================== */
+
+class NsPanelSensorsCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-sensors-card'; }
+  static get requiresEntity() { return false; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() { return { entities: [], show_icons: true }; }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).filter((e) => e.indexOf('sensor.') === 0).slice(0, 3)
+      : [];
+    return { entities: found.length ? found : ['sensor.example'], height: 130 };
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    if (!this._items.length) {
+      throw new Error(`${this.constructor.cardType}: "entities" needs at least one entity`);
+    }
+  }
+
+  /* Each item is either "sensor.x" or {entity, name, icon, unit, decimals}. */
+  get _items() {
+    const list = Array.isArray(this._config.entities) ? this._config.entities : [];
+    return list
+      .map((it) => (typeof it === 'string' ? { entity: it } : it))
+      .filter((it) => it && it.entity)
+      .slice(0, 4);
+  }
+
+  _entityIds() { return this._items.map((i) => i.entity); }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="content"><div class="strip"></div></div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    const strip = this.shadowRoot.querySelector('.strip');
+
+    this._cells = this._items.map((item) => {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.innerHTML = (this._config.show_icons ? '<ha-icon></ha-icon>' : '') +
+        '<div class="cv"></div><div class="cl"></div>';
+      cell.addEventListener('click', () => {
+        if (this._config.more_info) moreInfo(this, item.entity);
+      });
+      strip.appendChild(cell);
+      return {
+        item,
+        icon: cell.querySelector('ha-icon'),
+        value: cell.querySelector('.cv'),
+        label: cell.querySelector('.cl'),
+      };
+    });
+  }
+
+  _render() {
+    if (!this._cells) return;
+    this._cells.forEach((c) => {
+      const s = this._state(c.item.entity);
+      const broken = isBroken(s);
+      const n = numeric(s);
+      const unit = c.item.unit === undefined || c.item.unit === null
+        ? unitOf(s) : c.item.unit;
+      const text = broken ? '—'
+        : (n === null ? (s ? s.state : '—') : fmt(n, c.item.decimals));
+      c.value.innerHTML = unit && !broken ? `${text}<small>${unit}</small>` : text;
+      c.label.textContent = c.item.name || friendly(s, c.item.entity);
+      if (c.icon) {
+        c.icon.setAttribute('icon',
+          c.item.icon || (s && s.attributes.icon) || classIcon(s, c.item.entity));
+      }
+    });
+  }
+}
+
+/* ================================================================== *
+ * Status card - is the house alright?
+ *
+ * Quiet when everything is normal, loud when it is not. With only_problems
+ * the usual state of this card is an empty one, which is the fastest thing
+ * on the panel to read.
+ * ================================================================== */
+
+/* What counts as "not normal", by domain. Anything not listed here is never a
+   problem unless the card config says so with problem_when. */
+const PROBLEM_WHEN = {
+  lock: ['unlocked', 'open', 'opening', 'jammed'],
+  cover: ['open', 'opening'],
+  binary_sensor: ['on'],
+  input_boolean: ['on'],
+  switch: ['on'],
+  person: ['not_home'],
+  device_tracker: ['not_home'],
+};
+
+class NsPanelStatusCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-status-card'; }
+  static get requiresEntity() { return false; }
+  static get accent() { return '#f0a03c'; }
+  static get defaultOptions() {
+    return { entities: [], only_problems: false, columns: 2, all_clear: 'All clear' };
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).filter((e) => e.indexOf('binary_sensor.') === 0).slice(0, 4)
+      : [];
+    return { entities: found.length ? found : ['binary_sensor.example'], height: 200 };
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    if (!this._items.length) {
+      throw new Error(`${this.constructor.cardType}: "entities" needs at least one entity`);
+    }
+  }
+
+  get _items() {
+    const list = Array.isArray(this._config.entities) ? this._config.entities : [];
+    return list
+      .map((it) => (typeof it === 'string' ? { entity: it } : it))
+      .filter((it) => it && it.entity);
+  }
+
+  _entityIds() { return this._items.map((i) => i.entity); }
+
+  _isProblem(item, s) {
+    if (!s) return true;                    // a missing entity is itself a problem
+    if (s.state === 'unavailable' || s.state === 'unknown') return true;
+    if (Array.isArray(item.problem_when)) return item.problem_when.indexOf(s.state) !== -1;
+    const list = PROBLEM_WHEN[item.entity.split('.')[0]];
+    return list ? list.indexOf(s.state) !== -1 : false;
+  }
+
+  _stateLabel(item, s) {
+    if (!s) return 'Missing';
+    if (s.state === 'unavailable') return 'Unavailable';
+    if (s.state === 'unknown') return 'Unknown';
+    if (item.entity.split('.')[0] === 'binary_sensor') {
+      const c = deviceClass(s);
+      const on = s.state === 'on';
+      if (c === 'door' || c === 'window' || c === 'garage_door' || c === 'opening') {
+        return on ? 'Open' : 'Closed';
+      }
+      if (c === 'motion' || c === 'occupancy') return on ? 'Detected' : 'Clear';
+      if (c === 'moisture') return on ? 'Wet' : 'Dry';
+      if (c === 'problem') return on ? 'Problem' : 'OK';
+      return on ? 'On' : 'Off';
+    }
+    return s.state.charAt(0).toUpperCase() + s.state.slice(1).replace(/_/g, ' ');
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="content">
+          <div class="grid"></div>
+          <div class="clear" hidden>
+            <ha-icon icon="mdi:check-circle-outline"></ha-icon>
+            <div></div>
+          </div>
+        </div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._grid = this.shadowRoot.querySelector('.grid');
+    this._clear = this.shadowRoot.querySelector('.clear');
+    this._clear.querySelector('div').textContent = this._config.all_clear;
+
+    // Every tile is built once and hidden when not shown. Rebuilding the grid
+    // on each state change would be the one expensive thing this card could do.
+    this._tiles = this._items.map((item) => {
+      const el = document.createElement('button');
+      el.className = 'tile' + (this._config.columns === 1 ? ' wide' : '');
+      el.innerHTML = '<ha-icon></ha-icon><div class="tt">' +
+        '<div class="tn"></div><div class="ts"></div></div>';
+      el.addEventListener('click', () => {
+        if (this._config.more_info) moreInfo(this, item.entity);
+      });
+      this._grid.appendChild(el);
+      return {
+        item,
+        el,
+        icon: el.querySelector('ha-icon'),
+        name: el.querySelector('.tn'),
+        sub: el.querySelector('.ts'),
+      };
+    });
+  }
+
+  _render() {
+    if (!this._tiles) return;
+    let problems = 0;
+    this._tiles.forEach((t) => {
+      const s = this._state(t.item.entity);
+      const bad = this._isProblem(t.item, s);
+      if (bad) problems++;
+      const hidden = this._config.only_problems && !bad;
+      t.el.hidden = hidden;
+      if (hidden) return;
+      t.el.classList.toggle('alert', bad);
+      t.icon.setAttribute('icon',
+        t.item.icon || (s && s.attributes.icon) || classIcon(s, t.item.entity));
+      t.name.textContent = t.item.name || friendly(s, t.item.entity);
+      t.sub.textContent = this._stateLabel(t.item, s);
+    });
+    const showClear = this._config.only_problems && problems === 0;
+    this._clear.hidden = !showClear;
+    this._grid.hidden = showClear;
+  }
+}
+
+/* ================================================================== *
+ * Climate card - the setpoint under the same thumb as everything else
+ *
+ * A control card, so it is an NsBaseCard: drag sets the target temperature
+ * across the thermostat's own min/max, and the long-press sheet carries the
+ * HVAC modes. Tap opens more-info rather than toggling - switching a heating
+ * system off by brushing past the panel is a bad afternoon.
+ * ================================================================== */
+
+const HVAC_ICONS = {
+  off: 'mdi:power',
+  heat: 'mdi:fire',
+  cool: 'mdi:snowflake',
+  heat_cool: 'mdi:sun-snowflake-variant',
+  auto: 'mdi:thermostat-auto',
+  dry: 'mdi:water-percent',
+  fan_only: 'mdi:fan',
+};
+
+const HVAC_LABELS = {
+  off: 'Off',
+  heat: 'Heat',
+  cool: 'Cool',
+  heat_cool: 'Auto',
+  auto: 'Auto',
+  dry: 'Dry',
+  fan_only: 'Fan',
+};
+
+class NsPanelClimateCard extends NsBaseCard {
+  static get cardType() { return 'nspanel-climate-card'; }
+  static get domain() { return 'climate'; }
+  static get accent() { return '#ff8a65'; }
+  /* step in degrees, not percent - the base default of 5 would be absurd here.
+     more_info because this card's tap opens the dialog instead of toggling. */
+  static get defaultOptions() {
+    return { step: 0.5, more_info: true, min: null, max: null };
+  }
+  static get defaultPresets() {
+    return [
+      { name: 'Eco', temperature: 17 },
+      { name: 'Day', temperature: 20.5 },
+      { name: 'Warm', temperature: 22 },
+    ];
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('climate.') === 0)
+      : null;
+    return { entity: found || 'climate.example', height: 220 };
+  }
+
+  /* The thermostat's own limits unless the config narrows them, which is worth
+     doing: 7-35 makes every drag a wild one. */
+  _range() {
+    const s = this._stateObj;
+    const a = (s && s.attributes) || {};
+    const min = typeof this._config.min === 'number' ? this._config.min
+      : (typeof a.min_temp === 'number' ? a.min_temp : 7);
+    const max = typeof this._config.max === 'number' ? this._config.max
+      : (typeof a.max_temp === 'number' ? a.max_temp : 35);
+    return { min, max: max > min ? max : min + 1 };
+  }
+
+  _target() {
+    const s = this._stateObj;
+    const a = (s && s.attributes) || {};
+    if (typeof a.temperature === 'number') return a.temperature;
+    // A heat_cool thermostat has no single target; the midpoint is the honest
+    // thing to drag, and the sheet shows the real state text.
+    if (typeof a.target_temp_low === 'number' && typeof a.target_temp_high === 'number') {
+      return (a.target_temp_low + a.target_temp_high) / 2;
+    }
+    return this._range().min;
+  }
+
+  _entityValue() {
+    const r = this._range();
+    return clamp((this._target() - r.min) / (r.max - r.min), 0, 1);
+  }
+
+  /* Back from 0..1 to degrees, rounded to the configured step so the panel
+     never sends 20.4999 to a thermostat that shows whole halves. */
+  _degrees(v) {
+    const r = this._range();
+    const step = this._config.step || 0.5;
+    const raw = r.min + v * (r.max - r.min);
+    return clamp(Math.round(raw / step) * step, r.min, r.max);
+  }
+
+  _hvacModes() {
+    const s = this._stateObj;
+    const modes = (s && s.attributes && s.attributes.hvac_modes) || [];
+    return modes.filter((m) => HVAC_LABELS[m]);
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    const cfg = this._config;
+    const tint = tintStops(this._accent());
+    this.shadowRoot.innerHTML = `
+      <style>${BASE_CSS}</style>
+      <div class="card" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+        --ns-fill-strong:${tint.strong};--ns-fill-weak:${tint.weak}">
+        <div class="fillwrap"><div class="fill"></div></div>
+        <div class="badge" hidden>Offline</div>
+        <div class="content">
+          <div class="row">
+            <div class="icon"><ha-icon></ha-icon></div>
+            <div class="value">0<small>&deg;</small></div>
+          </div>
+          <div>
+            <div class="name"></div>
+            <div class="sub"></div>
+            <div class="presets"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
+    this._elValue = this.shadowRoot.querySelector('.value');
+    this._elName = this.shadowRoot.querySelector('.name');
+    this._elSub = this.shadowRoot.querySelector('.sub');
+    this._elBadge = this.shadowRoot.querySelector('.badge');
+    this._elPresets = this.shadowRoot.querySelector('.presets');
+
+    if (cfg.show_presets && cfg.presets.length) {
+      cfg.presets.slice(0, 4).forEach((p) => {
+        const b = document.createElement('button');
+        b.className = 'chip';
+        b.textContent = p.name;
+        b.addEventListener('click', (e) => { e.stopPropagation(); this._applyPreset(p); });
+        this._elPresets.appendChild(b);
+      });
+    } else {
+      this._elPresets.hidden = true;
+    }
+
+    this._bindGestures(this._card);
+  }
+
+  _applyPreset(p) {
+    this._haptic('light');
+    if (p.hvac_mode) this._call('climate', 'set_hvac_mode', { hvac_mode: p.hvac_mode });
+    if (p.preset_mode) this._call('climate', 'set_preset_mode', { preset_mode: p.preset_mode });
+    if (typeof p.temperature === 'number') {
+      this._call('climate', 'set_temperature', { temperature: p.temperature });
+      const r = this._range();
+      this._local = clamp((p.temperature - r.min) / (r.max - r.min), 0, 1);
+      this._localUntil = Date.now() + this._config.echo_ms;
+      this._scheduleRender();
+    }
+  }
+
+  _onTap() {
+    if (this._config.more_info === false) return;
+    moreInfo(this, this._config.entity);
+  }
+
+  _commit(v) {
+    this._call('climate', 'set_temperature', { temperature: this._degrees(v) });
+  }
+
+  _openSheet() {
+    const s = this._stateObj;
+    const acts = this._hvacModes().map((m) => ({
+      label: HVAC_LABELS[m],
+      icon: HVAC_ICONS[m],
+      primary: s && s.state === m,
+      run: () => this._call('climate', 'set_hvac_mode', { hvac_mode: m }),
+    })).slice(0, 4);
+
+    sheet().open({
+      title: this._title(),
+      state: this._stateText(s),
+      value: this._displayValue(),
+      accent: this._accent(),
+      step: (this._config.step / (this._range().max - this._range().min)) * 100,
+      actions: acts,
+      onInput: (v) => {
+        this._local = v;
+        this._localUntil = Date.now() + this._config.echo_ms;
+        this._scheduleRender();
+      },
+      onCommit: (v) => this._commit(v),
+    });
+  }
+
+  _stateText(s) {
+    if (!s) return '';
+    const a = s.attributes || {};
+    const now = typeof a.current_temperature === 'number'
+      ? `Now ${fmt(a.current_temperature, 1)}°` : '';
+    const action = a.hvac_action
+      ? a.hvac_action.charAt(0).toUpperCase() + a.hvac_action.slice(1)
+      : (HVAC_LABELS[s.state] || s.state);
+    return now ? `${now} · ${action}` : action;
+  }
+
+  _render() {
+    if (!this._card) return;
+    const cfg = this._config;
+    const s = this._stateObj;
+    const broken = isBroken(s);
+    const off = !s || s.state === 'off';
+    const v = this._displayValue();
+    const target = this._degrees(v);
+
+    this._card.classList.toggle('unavailable', broken);
+    this._card.classList.toggle('on', !off && !broken);
+    this._elBadge.hidden = !broken;
+
+    this._card.style.setProperty('--ns-fill', String(broken ? 0 : v));
+    this._card.style.setProperty('--ns-fill-opacity', off || broken ? '0' : '1');
+
+    this._elIcon.setAttribute('icon', cfg.icon || (s && s.attributes.icon) ||
+      HVAC_ICONS[s ? s.state : 'off'] || 'mdi:thermostat');
+    this._elName.textContent = this._title();
+
+    const stamp = `${target}|${off}|${broken}`;
+    if (this._shown !== stamp) {
+      this._shown = stamp;
+      this._elValue.innerHTML = broken || off ? '' : `${fmt(target, 1)}<small>&deg;</small>`;
+      this._elSub.textContent = broken ? 'Unavailable' : this._stateText(s);
+    }
+  }
+}
+
+/* ================================================================== *
+ * Weather card
+ *
+ * Current conditions come off the entity. The forecast does not: since HA
+ * 2024.4 it is a websocket subscription with a lifecycle of its own, so the
+ * card subscribes once it has both a connection and a config, and drops the
+ * subscription when it leaves the DOM. Panels get rebuilt on every page
+ * swipe, and a leaked subscription per swipe would be a slow bleed.
+ * ================================================================== */
+
+const WEATHER_ICONS = {
+  'clear-night': 'mdi:weather-night',
+  cloudy: 'mdi:weather-cloudy',
+  fog: 'mdi:weather-fog',
+  hail: 'mdi:weather-hail',
+  lightning: 'mdi:weather-lightning',
+  'lightning-rainy': 'mdi:weather-lightning-rainy',
+  partlycloudy: 'mdi:weather-partly-cloudy',
+  pouring: 'mdi:weather-pouring',
+  rainy: 'mdi:weather-rainy',
+  snowy: 'mdi:weather-snowy',
+  'snowy-rainy': 'mdi:weather-snowy-rainy',
+  sunny: 'mdi:weather-sunny',
+  windy: 'mdi:weather-windy',
+  'windy-variant': 'mdi:weather-windy',
+  exceptional: 'mdi:alert-circle-outline',
+};
+
+/* The HA condition slugs that do not survive a naive de-slugging. */
+const CONDITION_LABELS = {
+  partlycloudy: 'Partly cloudy',
+  'clear-night': 'Clear',
+  'lightning-rainy': 'Thunder, rain',
+  'snowy-rainy': 'Sleet',
+  'windy-variant': 'Windy',
+  pouring: 'Heavy rain',
+  exceptional: 'Severe',
+};
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+class NsPanelWeatherCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-weather-card'; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() {
+    return { show_forecast: true, forecast_type: 'daily', forecast_count: 4 };
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('weather.') === 0)
+      : null;
+    return { entity: found || 'weather.home', height: 240 };
+  }
+
+  _teardown() {
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+    this._wantSub = false;
+    this._forecast = null;
+  }
+
+  _afterHass() {
+    this._subscribeForecast();
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._subscribeForecast();
+  }
+
+  _subscribeForecast() {
+    const conn = this._hass && this._hass.connection;
+    if (!conn || !this._config || !this._config.show_forecast) return;
+    if (this._unsub || this._wantSub) return;             // already on, or in flight
+    if (!conn.subscribeMessage) return;                   // very old frontend
+    this._wantSub = true;
+    conn.subscribeMessage(
+      (msg) => {
+        this._forecast = (msg && msg.forecast) || [];
+        this._scheduleRender();
+      },
+      {
+        type: 'weather/subscribe_forecast',
+        forecast_type: this._config.forecast_type,
+        entity_id: this._config.entity,
+      }
+    ).then((unsub) => {
+      // The card can leave the DOM while the subscribe is still in flight.
+      if (!this._wantSub) { unsub(); return; }
+      this._unsub = unsub;
+    }).catch(() => {
+      // Older cores have no such command; the attribute fallback covers them.
+      this._wantSub = false;
+      this._scheduleRender();
+    });
+  }
+
+  _forecastList() {
+    const s = this._stateObj;
+    const list = this._forecast ||
+      (s && s.attributes && s.attributes.forecast) || [];
+    return list.slice(0, clamp(this._config.forecast_count || 4, 1, 5));
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="badge" hidden>Offline</div>
+        <div class="content">
+          <div class="row">
+            <div class="icon"><ha-icon></ha-icon></div>
+            <div class="big"></div>
+          </div>
+          <div>
+            <div class="name"></div>
+            <div class="sub"></div>
+            <div class="fc"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
+    this._elValue = this.shadowRoot.querySelector('.big');
+    this._elName = this.shadowRoot.querySelector('.name');
+    this._elSub = this.shadowRoot.querySelector('.sub');
+    this._elBadge = this.shadowRoot.querySelector('.badge');
+    this._elFc = this.shadowRoot.querySelector('.fc');
+    this._bindMoreInfo(this._card);
+  }
+
+  _render() {
+    if (!this._card) return;
+    const cfg = this._config;
+    const s = this._stateObj;
+    const broken = isBroken(s);
+    const a = (s && s.attributes) || {};
+
+    this._card.classList.toggle('unavailable', broken);
+    this._elBadge.hidden = !broken;
+
+    this._elIcon.setAttribute('icon',
+      cfg.icon || WEATHER_ICONS[s ? s.state : ''] || 'mdi:weather-cloudy');
+    this._elName.textContent = this._title();
+
+    const temp = typeof a.temperature === 'number' ? a.temperature : null;
+    const unit = (a.temperature_unit || '°');
+    this._elValue.innerHTML = temp === null ? '—' : `${fmt(temp, 0)}<small>${unit}</small>`;
+
+    const bits = [];
+    if (s && s.state) {
+      bits.push(CONDITION_LABELS[s.state] ||
+        s.state.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
+    }
+    if (typeof a.humidity === 'number') bits.push(`${fmt(a.humidity, 0)}%`);
+    if (typeof a.wind_speed === 'number') {
+      bits.push(`${fmt(a.wind_speed, 0)} ${a.wind_speed_unit || ''}`.trim());
+    }
+    this._elSub.textContent = broken ? 'Unavailable' : bits.join(' · ');
+
+    this._renderForecast(unit);
+  }
+
+  /* The forecast rebuilds only when the data actually changes - it arrives on
+     its own subscription, not with every hass update, but a repaint per state
+     change would still be wasteful. */
+  _renderForecast(unit) {
+    const list = this._config.show_forecast ? this._forecastList() : [];
+    const stamp = JSON.stringify(list.map((f) => [f.datetime, f.condition,
+      f.temperature, f.templow]));
+    if (stamp === this._fcShown) return;
+    this._fcShown = stamp;
+
+    this._elFc.hidden = !list.length;
+    this._elFc.innerHTML = '';
+    list.forEach((f) => {
+      const d = document.createElement('div');
+      d.className = 'd';
+      const when = f.datetime ? new Date(f.datetime) : null;
+      const label = when
+        ? (this._config.forecast_type === 'hourly'
+          ? String(when.getHours()).padStart(2, '0')
+          : DAY_NAMES[when.getDay()])
+        : '';
+      const low = typeof f.templow === 'number' ? `<span>${fmt(f.templow, 0)}</span>` : '';
+      d.innerHTML =
+        `<div class="dd">${label}</div>` +
+        `<ha-icon icon="${WEATHER_ICONS[f.condition] || 'mdi:weather-cloudy'}"></ha-icon>` +
+        `<div class="dt">${fmt(f.temperature, 0)}${unit === '%' ? '' : ''}${low}</div>`;
+      this._elFc.appendChild(d);
+    });
+  }
+}
+
+/* ================================================================== *
+ * Clock card
+ *
+ * Panels idle far more than they are touched, and a wall panel showing the
+ * time is doing something useful for free. One timer, aligned to the top of
+ * the minute so the digits change when they should, writing textContent.
+ * ================================================================== */
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+  'Friday', 'Saturday'];
+
+class NsPanelClockCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-clock-card'; }
+  static get requiresEntity() { return false; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() {
+    return { hour_24: true, show_date: true, show_seconds: false, entity: null };
+  }
+
+  static getStubConfig() { return { height: 200 }; }
+
+  /* The optional entity is a line under the clock - a calendar's next event,
+     an alarm, whatever the panel should say when nobody is touching it. */
+  _entityIds() { return this._config.entity ? [this._config.entity] : []; }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="content" style="justify-content:center">
+          <div>
+            <div class="clock-t"></div>
+            <div class="clock-d"></div>
+            <div class="sub" style="margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._elTime = this.shadowRoot.querySelector('.clock-t');
+    this._elDate = this.shadowRoot.querySelector('.clock-d');
+    this._elSub = this.shadowRoot.querySelector('.sub');
+    if (this._config.entity) this._bindMoreInfo(this._card);
+    this._startTimer();
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._startTimer();
+  }
+
+  _teardown() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  }
+
+  /* Re-armed each tick against the wall clock rather than set on an interval,
+     so it cannot drift and cannot fire twice in a second after a resume. */
+  _startTimer() {
+    this._teardown();
+    // connectedCallback can land before setConfig - HA is free to attach the
+    // element first - and a tick without a config throws inside a custom
+    // element reaction, where nothing catches it. setConfig starts the timer.
+    if (!this.isConnected || !this._config) return;
+    const tick = () => {
+      this._scheduleRender();
+      const now = Date.now();
+      const period = this._config.show_seconds ? 1000 : 60000;
+      this._timer = setTimeout(tick, period - (now % period) + 20);
+    };
+    tick();
+  }
+
+  _render() {
+    if (!this._elTime) return;
+    const cfg = this._config;
+    const now = new Date();
+    let h = now.getHours();
+    let suffix = '';
+    if (!cfg.hour_24) {
+      suffix = h < 12 ? 'am' : 'pm';
+      h = h % 12 || 12;
+    }
+    const hh = cfg.hour_24 ? String(h).padStart(2, '0') : String(h);
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = cfg.show_seconds ? ':' + String(now.getSeconds()).padStart(2, '0') : '';
+    this._elTime.innerHTML = `${hh}:${mm}${ss}` + (suffix ? `<small>${suffix}</small>` : '');
+
+    this._elDate.hidden = !cfg.show_date;
+    if (cfg.show_date) {
+      this._elDate.textContent =
+        `${DAYS_LONG[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}`;
+    }
+
+    const s = cfg.entity ? this._state(cfg.entity) : null;
+    const line = s
+      ? (this._config.title ? `${this._config.title}: ` : '') +
+        (s.attributes && s.attributes.message ? s.attributes.message : s.state)
+      : '';
+    this._elSub.textContent = line;
+    this._elSub.hidden = !line;
+  }
+}
+
+/* ================================================================== *
  * Probe - what is this panel actually running?
  *
  * Drop it on a dashboard once, read the numbers off the glass, delete it.
@@ -1296,6 +2534,23 @@ const EDITOR_LABELS = {
   long_press_ms: 'Long press (ms)',
   step: 'Step for the +/- buttons',
   haptics: 'Haptics',
+  more_info: 'Tap opens more-info',
+  secondary: 'Second entity (shown underneath)',
+  unit: 'Unit (blank = the entity\'s own)',
+  decimals: 'Decimals',
+  min: 'Range minimum',
+  max: 'Range maximum',
+  bar: 'Show the level as a bar',
+  show_icons: 'Show icons',
+  only_problems: 'Only show what is wrong',
+  columns: 'Columns',
+  all_clear: 'All-clear text',
+  show_forecast: 'Show forecast',
+  forecast_type: 'Forecast',
+  forecast_count: 'Forecast entries',
+  hour_24: '24-hour clock',
+  show_date: 'Show the date',
+  show_seconds: 'Show seconds',
 };
 
 /* The options every card takes. The entity row is prepended per card, because
@@ -1335,6 +2590,15 @@ const SHARED_SCHEMA = [
 ];
 
 class NsBaseCardEditor extends HTMLElement {
+  static get rows() { return SHARED_SCHEMA; }
+  static get hasEntityRow() { return true; }
+  static get entityRequired() { return true; }
+  static get domain() { return null; }
+  static get note() {
+    return 'Presets are a list, which this form cannot draw. Edit them in YAML - ' +
+      'the GUI leaves them alone.';
+  }
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -1349,11 +2613,9 @@ class NsBaseCardEditor extends HTMLElement {
         code { font-size: 12px; }
       </style>
       <ha-form></ha-form>
-      <div class="note">
-        Presets are a list, which this form cannot draw. Edit them in YAML - the
-        GUI leaves them alone.
-      </div>
+      <div class="note"></div>
     `;
+    this.shadowRoot.querySelector('.note').textContent = this.constructor.note;
     this._form = this.shadowRoot.querySelector('ha-form');
     this._form.computeLabel = (schema) => EDITOR_LABELS[schema.name] || schema.name;
     this._form.addEventListener('value-changed', (e) => this._valueChanged(e));
@@ -1369,14 +2631,14 @@ class NsBaseCardEditor extends HTMLElement {
     this._form.hass = hass;
   }
 
+  /* rows = the card's own options; the entity row is prepended here because
+     only the editor knows whether the picker should be filtered to a domain,
+     optional (the clock), or absent entirely (the list cards). */
   get _schema() {
-    return [
-      {
-        name: 'entity',
-        required: true,
-        selector: { entity: { domain: this.constructor.domain } },
-      },
-    ].concat(SHARED_SCHEMA);
+    const c = this.constructor;
+    if (!c.hasEntityRow) return c.rows;
+    const selector = c.domain ? { entity: { domain: c.domain } } : { entity: {} };
+    return [{ name: 'entity', required: c.entityRequired, selector }].concat(c.rows);
   }
 
   /* `name` was the old spelling of `title`. Show it in the title box so the
@@ -1420,6 +2682,146 @@ class NsPanelCoverCardEditor extends NsBaseCardEditor {
   static get domain() { return 'cover'; }
 }
 
+
+/* The read-only cards share these four; everything else is per card. */
+const INFO_SCHEMA = [
+  { name: 'title', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'icon', selector: { icon: {} } },
+      { name: 'height', selector: { number: { min: 60, max: 480, step: 2, mode: 'box' } } },
+    ],
+  },
+  { name: 'accent', selector: { text: {} } },
+  { name: 'more_info', selector: { boolean: {} } },
+];
+
+const SENSOR_SCHEMA = INFO_SCHEMA.concat([
+  { name: 'secondary', selector: { entity: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'unit', selector: { text: {} } },
+      { name: 'decimals', selector: { number: { min: 0, max: 4, step: 1, mode: 'box' } } },
+      { name: 'min', selector: { number: { mode: 'box' } } },
+      { name: 'max', selector: { number: { mode: 'box' } } },
+    ],
+  },
+  { name: 'bar', selector: { boolean: {} } },
+]);
+
+const SENSORS_SCHEMA = INFO_SCHEMA.concat([
+  { name: 'show_icons', selector: { boolean: {} } },
+]);
+
+const STATUS_SCHEMA = INFO_SCHEMA.concat([
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'only_problems', selector: { boolean: {} } },
+      { name: 'columns', selector: { number: { min: 1, max: 2, step: 1, mode: 'box' } } },
+    ],
+  },
+  { name: 'all_clear', selector: { text: {} } },
+]);
+
+const WEATHER_SCHEMA = INFO_SCHEMA.concat([
+  { name: 'show_forecast', selector: { boolean: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      {
+        name: 'forecast_type',
+        selector: { select: { mode: 'dropdown', options: [
+          { value: 'daily', label: 'Daily' },
+          { value: 'hourly', label: 'Hourly' },
+        ] } },
+      },
+      { name: 'forecast_count', selector: { number: { min: 1, max: 5, step: 1, mode: 'box' } } },
+    ],
+  },
+]);
+
+const CLOCK_SCHEMA = [
+  { name: 'title', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'icon', selector: { icon: {} } },
+      { name: 'height', selector: { number: { min: 60, max: 480, step: 2, mode: 'box' } } },
+    ],
+  },
+  { name: 'accent', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'hour_24', selector: { boolean: {} } },
+      { name: 'show_date', selector: { boolean: {} } },
+      { name: 'show_seconds', selector: { boolean: {} } },
+      { name: 'more_info', selector: { boolean: {} } },
+    ],
+  },
+];
+
+/* The climate card is a control card, so it takes the control options plus a
+   range of its own. */
+const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'min', selector: { number: { min: 4, max: 35, step: 0.5, mode: 'box' } } },
+      { name: 'max', selector: { number: { min: 4, max: 35, step: 0.5, mode: 'box' } } },
+    ],
+  },
+  { name: 'more_info', selector: { boolean: {} } },
+]);
+
+const LIST_NOTE = 'Entities are a list, which this form cannot draw. Edit them in ' +
+  'YAML - the GUI leaves them alone.';
+
+class NsPanelClimateCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-climate-card'; }
+  static get domain() { return 'climate'; }
+  static get rows() { return CLIMATE_SCHEMA; }
+}
+
+class NsPanelSensorCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-sensor-card'; }
+  static get rows() { return SENSOR_SCHEMA; }
+  static get note() {
+    return 'Severity colours are a list, which this form cannot draw. Edit them ' +
+      'in YAML - the GUI leaves them alone.';
+  }
+}
+
+class NsPanelSensorsCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-sensors-card'; }
+  static get hasEntityRow() { return false; }
+  static get rows() { return SENSORS_SCHEMA; }
+  static get note() { return LIST_NOTE; }
+}
+
+class NsPanelStatusCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-status-card'; }
+  static get hasEntityRow() { return false; }
+  static get rows() { return STATUS_SCHEMA; }
+  static get note() { return LIST_NOTE; }
+}
+
+class NsPanelWeatherCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-weather-card'; }
+  static get domain() { return 'weather'; }
+  static get rows() { return WEATHER_SCHEMA; }
+  static get note() {
+    return 'The forecast comes from Home Assistant on its own subscription; ' +
+      'turn it off above if the entity has none.';
+  }
+}
+
+class NsPanelClockCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-clock-card'; }
+  static get entityRequired() { return false; }
+  static get rows() { return CLOCK_SCHEMA; }
+  static get note() {
+    return 'The entity is optional: pick a calendar or sensor to print a line ' +
+      'under the clock, or leave it empty for just the time.';
+  }
+}
+
 /* ================================================================== *
  * registration
  * ================================================================== */
@@ -1427,8 +2829,21 @@ class NsPanelCoverCardEditor extends NsBaseCardEditor {
 customElements.define('nspanel-light-card', NsPanelLightCard);
 customElements.define('nspanel-cover-card', NsPanelCoverCard);
 customElements.define('nspanel-probe-card', NsPanelProbeCard);
+customElements.define('nspanel-climate-card', NsPanelClimateCard);
+customElements.define('nspanel-sensor-card', NsPanelSensorCard);
+customElements.define('nspanel-sensors-card', NsPanelSensorsCard);
+customElements.define('nspanel-status-card', NsPanelStatusCard);
+customElements.define('nspanel-weather-card', NsPanelWeatherCard);
+customElements.define('nspanel-clock-card', NsPanelClockCard);
+
 customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
 customElements.define('nspanel-cover-card-editor', NsPanelCoverCardEditor);
+customElements.define('nspanel-climate-card-editor', NsPanelClimateCardEditor);
+customElements.define('nspanel-sensor-card-editor', NsPanelSensorCardEditor);
+customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
+customElements.define('nspanel-status-card-editor', NsPanelStatusCardEditor);
+customElements.define('nspanel-weather-card-editor', NsPanelWeatherCardEditor);
+customElements.define('nspanel-clock-card-editor', NsPanelClockCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push(
@@ -1442,6 +2857,42 @@ window.customCards.push(
     type: 'nspanel-cover-card',
     name: 'NSPanel Cover',
     description: 'Big-touch blind and cover control for the NSPanel Pro 86.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-climate-card',
+    name: 'NSPanel Climate',
+    description: 'Thermostat for the NSPanel Pro 86. Drag to set the target, long-press for modes.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-sensor-card',
+    name: 'NSPanel Sensor',
+    description: 'One reading, large enough to read from across the room.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-sensors-card',
+    name: 'NSPanel Sensors',
+    description: 'Two to four readings side by side, for a panel page that has to earn its space.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-status-card',
+    name: 'NSPanel Status',
+    description: 'Doors, windows, locks: quiet when all is well, loud when it is not.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-weather-card',
+    name: 'NSPanel Weather',
+    description: 'Current conditions and a short forecast, sized for the panel.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-clock-card',
+    name: 'NSPanel Clock',
+    description: 'Time, date and an optional line from any entity. For the page a panel idles on.',
     preview: true,
   },
   {
@@ -1461,7 +2912,20 @@ window.NsPanelCards = {
   NsPanelLightCard,
   NsPanelCoverCard,
   NsPanelProbeCard,
+  NsPanelClimateCard,
+  NsPanelSensorCard,
+  NsPanelSensorsCard,
+  NsPanelStatusCard,
+  NsPanelWeatherCard,
+  NsPanelClockCard,
+  NsInfoCard,
   NsPanelLightCardEditor,
   NsPanelCoverCardEditor,
+  NsPanelClimateCardEditor,
+  NsPanelSensorCardEditor,
+  NsPanelSensorsCardEditor,
+  NsPanelStatusCardEditor,
+  NsPanelWeatherCardEditor,
+  NsPanelClockCardEditor,
   NsSheet,
 };

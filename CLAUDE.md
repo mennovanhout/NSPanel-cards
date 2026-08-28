@@ -8,7 +8,14 @@ A HACS-installable Lovelace plugin: three custom cards for the **Sonoff NSPanel 
 (square 480×480 wall panel, Rockchip PX30 / 2 GB / Mali-G31, Android 8.1). Distributed as a
 single JavaScript file that Home Assistant loads as a module resource.
 
-Cards: `custom:nspanel-light-card`, `custom:nspanel-cover-card`, `custom:nspanel-probe-card`.
+Cards, in two families:
+
+- **Controls** (`NsBaseCard`): `nspanel-light-card`, `nspanel-cover-card`, `nspanel-climate-card`.
+  Gesture engine, echo window, one entity each.
+- **Information** (`NsInfoCard`): `nspanel-sensor-card`, `nspanel-sensors-card`,
+  `nspanel-status-card`, `nspanel-weather-card`, `nspanel-clock-card`. Read-only, often several
+  entities, tap opens more-info.
+- `nspanel-probe-card` is neither — a standalone diagnostics element.
 
 ## Repo layout
 
@@ -21,6 +28,7 @@ dev/bench.html             preview bench: mock hass + an ha-icon stub, renders t
                            bundle in a 480x480 frame outside Home Assistant
 dev/editor.html            harness for the GUI editor: stubs ha-form, shows the emitted
                            config-changed payload, and runs the option sync check
+dev/mdi-icons.js           vendored MDI path data for the bench's ha-icon stub
 dev/serve.py               no-cache static server for both (plain http.server lets Chrome
                            cache the bundle and render the previous build)
 dev/shots.ps1              drives headless Chrome over the bench to regenerate the README
@@ -38,11 +46,15 @@ python dev/serve.py               # from the repo root, then, in another shell:
 powershell -NoProfile -File dev/shots.ps1
 ```
 
-`dev/bench.html?shot=light|cover|sheet` is the bare 480x480 capture mode the script drives;
-loading `dev/bench.html` with no query string gives the three-panel bench for eyeballing
-changes. The bench vendors the MDI path data it needs (HA's `ha-icon` does not exist outside
-HA) so it works offline — add a path to the `MDI` table there if a card starts using a new
-icon.
+`dev/bench.html?shot=<id>` is the bare 480x480 capture mode the script drives - ids are
+`light`, `cover`, `sheet`, `climate`, `info`, `status`, `sky`, one per panel in the bench.
+Loading `dev/bench.html` with no query string gives the whole rack for eyeballing changes.
+
+HA's `ha-icon` does not exist outside HA, so the bench stubs it against `dev/mdi-icons.js`.
+**A card that starts using an icon not in that table renders an empty box in the bench and in
+the screenshots** (the stub logs a warning). Fetch the new path data from
+`https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/<name>.svg` and add it - do not write path
+data from memory, it will be wrong.
 
 ## There is no build step
 
@@ -90,18 +102,19 @@ Ordered top to bottom, separated by banner comments:
    via `sheet()`; mount target overridable through `window.NsPanelCards.sheetHost`).
 5. `NsBaseCard` — config normalisation, `hass` diffing, render scheduling, service calls, and
    the whole pointer-gesture engine (`_onDown`/`_onMove`/`_onUp`/`_onCancel`).
-6. `NsPanelLightCard`, `NsPanelCoverCard` — subclasses supplying `static cardType`,
-   `static domain`, `static accent`, `getStubConfig`, `_entityValue`, `_build`, `_render`,
-   `_commit`, `_onTap`, `_openSheet`.
-7. `NsPanelProbeCard` — standalone diagnostics element, not a `NsBaseCard`.
-8. `NsBaseCardEditor` + one subclass per card — the GUI editor HA builds from
+6. `NsPanelLightCard`, `NsPanelCoverCard`, `NsPanelClimateCard` — subclasses supplying
+   `static cardType`, `static domain`, `static accent`, `getStubConfig`, `_entityValue`,
+   `_build`, `_render`, `_commit`, `_onTap`, `_openSheet`.
+7. `INFO_CSS`, the `NsInfoCard` base and the five information cards — see below.
+8. `NsPanelProbeCard` — standalone diagnostics element, belonging to neither base.
+9. `NsBaseCardEditor` + one subclass per card — the GUI editor HA builds from
    `Card.getConfigElement()`. It renders `ha-form` (the frontend's own schema-driven form, so
    still no dependency of ours) from `SHARED_SCHEMA`, and on every change merges the form
    value over the previous config so keys the form does not own — `presets` above all —
    survive a trip through the GUI. It also writes the form data back to itself after emitting
    `config-changed`; without that the next edit ships a stale snapshot and reverts the one
    before it.
-9. Registration: `customElements.define`, `window.customCards` entries, `window.NsPanelCards`.
+10. Registration: `customElements.define`, `window.customCards` entries, `window.NsPanelCards`.
 
 ### Conventions
 
@@ -114,13 +127,16 @@ Ordered top to bottom, separated by banner comments:
 
 **An option lives in three places, and all three must agree:**
 
-1. the defaults literal in `NsBaseCard.setConfig`,
-2. the shared-options table in the README,
-3. `SHARED_SCHEMA` (plus `EDITOR_LABELS`) in the visual editor.
+1. the defaults - the literal in `NsBaseCard`/`NsInfoCard.setConfig`, or the card's own
+   `static defaultOptions`,
+2. the README: the shared-options table, or the card's own section,
+3. the card's editor schema (`SHARED_SCHEMA`, `INFO_SCHEMA`, `SENSOR_SCHEMA`, … ) plus a
+   label in `EDITOR_LABELS`.
 
 Miss (3) and the GUI silently drops the option from any card the user edits. `dev/editor.html`
-prints a sync check that compares (1) against (3) — open it after touching options; it should
-say `ok` for both cards. `presets` and the legacy `name` are the only exempt keys.
+prints a sync check comparing (1) against (3) for **every** card - open it after touching
+options; all eight rows should say `ok`. The exempt keys are the ones `ha-form` cannot draw:
+`presets`, `entities`, `severity`, and the legacy `name`.
 - Comments explain *why*, in prose, at the point where the reasoning is non-obvious. Match
   that density — this file is written to be read.
 - Single quotes, semicolons, 2-space indent, ~90 column soft wrap.
@@ -133,6 +149,26 @@ say `ok` for both cards. `presets` and the legacy `name` are the only exempt key
 resolve through `_title()`, which falls back to the entity's `friendly_name` — read the
 display name through that, never from the config directly. The editor migrates `name` into
 `title` when a user touches a card in the GUI.
+
+### Two bases, and which one a new card wants
+
+`NsBaseCard` is for cards you *set*: it carries the pointer-gesture engine, the `_local` echo
+window and a `hass` diff pinned to one entity. `NsInfoCard` is for cards you *read*: a diff
+over a list of entities (`_entityIds()`), the same rAF render and build-once DOM, no gestures,
+and `_teardown()` for anything with a lifetime — the clock's timer, the weather forecast
+subscription. A read-only card on `NsBaseCard` would spend its life switching machinery off.
+
+Both resolve per-card defaults through `static get defaultOptions()`, and control cards also
+have `static get defaultPresets()`. Use them. A subclass that assigns to `this._config` after
+`super.setConfig()` is writing into a config `_build()` has already read — that is the exact
+shape of a bug this repo has shipped once already.
+
+### `hidden` needs the CSS rule
+
+`BASE_CSS` carries `[hidden] { display: none !important; }`. Without it, setting `.hidden` on
+anything with a `display` of its own — every flex block here — does nothing at all, because a
+class rule outranks the UA sheet's `[hidden]`. The status grid and the presets row both fell
+into this.
 
 ### Local state vs. incoming state
 

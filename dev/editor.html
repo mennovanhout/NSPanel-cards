@@ -131,29 +131,48 @@ window.__editor = ed;
 
 /* ------------------------------------------------------------------ *
  * Sync check. Every option in a card's setConfig defaults needs a row
- * in the editor's schema or the GUI drops it silently, so the harness
- * says out loud when the two lists have drifted apart.
+ * in its editor's schema or the GUI drops it silently, so the harness
+ * says out loud when the two lists have drifted apart. Run this after
+ * touching options on any card.
  * ------------------------------------------------------------------ */
-const EDITOR_EXEMPT = ['presets', 'name'];   // list-valued; legacy alias of title
+const EDITOR_EXEMPT = ['type', 'name', 'presets', 'entities', 'severity'];
+
+const ALL_CARDS = [
+  ['nspanel-light-card', 'light.dining_lights'],
+  ['nspanel-cover-card', 'cover.blinds'],
+  ['nspanel-climate-card', 'climate.living'],
+  ['nspanel-sensor-card', 'sensor.co2'],
+  ['nspanel-sensors-card', null],
+  ['nspanel-status-card', null],
+  ['nspanel-weather-card', 'weather.home'],
+  ['nspanel-clock-card', null],
+];
 
 function syncReport() {
   const flat = (schema, out) => {
     (schema || []).forEach((r) => (r.type === 'grid' ? flat(r.schema, out) : out.push(r.name)));
     return out;
   };
-  const lines = [];
-  [['nspanel-light-card', window.NsPanelCards.NsPanelLightCard],
-   ['nspanel-cover-card', window.NsPanelCards.NsPanelCoverCard]].forEach(([tag, cls]) => {
+  return ALL_CARDS.map(([tag, entity]) => {
+    const cls = customElements.get(tag);
+    if (!cls || !cls.getConfigElement) return tag + ': no editor';
     const inForm = flat(cls.getConfigElement()._schema, []);
     const probe = document.createElement(tag);
     document.body.appendChild(probe);
-    probe.setConfig({ type: 'custom:' + tag, entity: tag.indexOf('light') > -1 ? 'light.x' : 'cover.x' });
+    const cfg = { type: 'custom:' + tag };
+    if (entity) cfg.entity = entity;
+    if (!entity && tag.indexOf('clock') === -1) cfg.entities = ['sensor.x'];
+    try {
+      probe.setConfig(cfg);
+    } catch (e) {
+      probe.remove();
+      return tag + ': setConfig threw - ' + e.message;
+    }
     const missing = Object.keys(probe._config)
-      .filter((k) => k !== 'type' && EDITOR_EXEMPT.indexOf(k) === -1 && inForm.indexOf(k) === -1);
+      .filter((k) => EDITOR_EXEMPT.indexOf(k) === -1 && inForm.indexOf(k) === -1);
     probe.remove();
-    lines.push(tag + ': ' + (missing.length ? 'MISSING FROM EDITOR -> ' + missing.join(', ') : 'ok'));
-  });
-  return lines.join(String.fromCharCode(10));
+    return tag + ': ' + (missing.length ? 'MISSING FROM EDITOR -> ' + missing.join(', ') : 'ok');
+  }).join(String.fromCharCode(10));
 }
 document.getElementById('sync').textContent = syncReport();
 </script>
