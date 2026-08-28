@@ -113,24 +113,28 @@ customElements.define('ha-icon', HaIcon);
 
 /* ------------------------------------------------------------------ *
  * Mock hass. The cards only ever touch states + callService.
+ *
+ * The friendly_names here are deliberately the raw ones Home Assistant
+ * tends to generate from the device - which is exactly what the cards'
+ * `title` option is for, and what the configs below override.
  * ------------------------------------------------------------------ */
 const hass = {
   states: {
     'light.dining_lights': {
       entity_id: 'light.dining_lights',
       state: 'on',
-      attributes: { friendly_name: 'Dining table', brightness: 173 },
+      attributes: { friendly_name: 'Shelly Dimmer 2 Dining', brightness: 173 },
     },
     'light.kitchen_spots': {
       entity_id: 'light.kitchen_spots',
       state: 'off',
-      attributes: { friendly_name: 'Kitchen spots' },
+      attributes: { friendly_name: 'Kitchen Spots Relay' },
     },
     'cover.blinds_living_room': {
       entity_id: 'cover.blinds_living_room',
       state: 'open',
       attributes: {
-        friendly_name: 'Living room blinds',
+        friendly_name: 'Somfy Living Room Roller',
         current_position: 62,
         supported_features: 15,
       },
@@ -139,7 +143,7 @@ const hass = {
       entity_id: 'cover.bedroom_blackout',
       state: 'closed',
       attributes: {
-        friendly_name: 'Bedroom blackout',
+        friendly_name: 'Bedroom Roller 2',
         current_position: 0,
         supported_features: 15,
       },
@@ -158,8 +162,11 @@ function card(type, config, mount) {
   return el;
 }
 
+/* These configs are the ones printed in the README, verbatim, so the
+   screenshots are pictures of the documented YAML. 260 + 184 + the 12px gap
+   fills a 480px panel exactly. */
 card('nspanel-light-card', {
-  entity: 'light.dining_lights', height: 258,
+  entity: 'light.dining_lights', title: 'Dining table', height: 260,
   presets: [
     { name: 'Low', brightness_pct: 15 },
     { name: 'Dinner', brightness_pct: 45, color_temp_kelvin: 2400 },
@@ -168,11 +175,12 @@ card('nspanel-light-card', {
 }, document.getElementById('s-light'));
 
 card('nspanel-light-card', {
-  entity: 'light.kitchen_spots', height: 186, show_presets: false,
+  entity: 'light.kitchen_spots', title: 'Kitchen spots',
+  height: 184, show_presets: false,
 }, document.getElementById('s-light'));
 
 card('nspanel-cover-card', {
-  entity: 'cover.blinds_living_room', height: 258,
+  entity: 'cover.blinds_living_room', title: 'Living room blinds', height: 260,
   presets: [
     { name: 'Open', position: 100 },
     { name: 'Privacy', position: 35 },
@@ -181,12 +189,13 @@ card('nspanel-cover-card', {
 }, document.getElementById('s-cover'));
 
 card('nspanel-cover-card', {
-  entity: 'cover.bedroom_blackout', height: 186, show_presets: false,
+  entity: 'cover.bedroom_blackout', title: 'Bedroom blackout',
+  height: 184, show_presets: false,
 }, document.getElementById('s-cover'));
 
 /* third panel: same light card, with the long-press sheet opened over it */
 const sheetCard = card('nspanel-light-card', {
-  entity: 'light.dining_lights', height: 258,
+  entity: 'light.dining_lights', title: 'Dining table', height: 260,
   presets: [
     { name: 'Low', brightness_pct: 15 },
     { name: 'Dinner', brightness_pct: 45, color_temp_kelvin: 2400 },
@@ -194,7 +203,8 @@ const sheetCard = card('nspanel-light-card', {
   ],
 }, document.getElementById('s-sheet'));
 card('nspanel-light-card', {
-  entity: 'light.kitchen_spots', height: 186, show_presets: false,
+  entity: 'light.kitchen_spots', title: 'Kitchen spots',
+  height: 184, show_presets: false,
 }, document.getElementById('s-sheet'));
 
 /* Keep the sheet inside the simulated panel instead of over the whole page. */

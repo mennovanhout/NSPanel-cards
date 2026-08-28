@@ -71,7 +71,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.1.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.2.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -79,11 +79,25 @@ the old file and wondering why nothing changed.
 
 ## Configuration
 
+Both the light and cover cards have a **visual editor** — add one from the dashboard's card
+picker, or click the pencil on an existing card, and you get HA's own controls: entity picker,
+icon picker, switches, the lot. Everything in the shared options table below is in there.
+
+`presets` is the one exception. It is a list of objects and HA's form builder has no control
+for that, so presets stay in YAML — the editor leaves the key untouched, so opening the GUI on
+a card with hand-written presets will not eat them. (The probe card has no options and no
+editor.)
+
 ### Light
+
+<table>
+<tr>
+<td valign="top">
 
 ```yaml
 type: custom:nspanel-light-card
 entity: light.dining_lights
+title: Dining table
 height: 260
 presets:
   - name: Low
@@ -95,14 +109,27 @@ presets:
     brightness_pct: 100
 ```
 
+</td>
+<td><img src="docs/images/light.png" alt="The card described on the left, at the top of a 480x480 panel, with a second preset-less light card below it" width="300"></td>
+</tr>
+</table>
+
+That is the card at the top of the picture; below it is a second one with
+`show_presets: false` and `height: 184`.
+
 A preset takes any of `brightness_pct`, `color_temp_kelvin`, `rgb_color`, `effect`, or `scene`
 (to fire a scene instead). `brightness_pct: 0` turns the light off.
 
 ### Cover
 
+<table>
+<tr>
+<td valign="top">
+
 ```yaml
 type: custom:nspanel-cover-card
 entity: cover.blinds_living_room
+title: Living room blinds
 height: 260
 presets:
   - name: Open
@@ -113,6 +140,14 @@ presets:
     position: 0
 ```
 
+</td>
+<td><img src="docs/images/cover.png" alt="The card described on the left at 62% open, above a second cover card showing a closed blackout blind" width="300"></td>
+</tr>
+</table>
+
+The fill descends from the top, the way a blind actually does: at 62% open it
+covers the top 38% of the card.
+
 Falls back to `open_cover` / `close_cover` when the entity doesn't advertise `SET_POSITION`.
 
 ### Shared options
@@ -120,7 +155,8 @@ Falls back to `open_cover` / `close_cover` when the entity doesn't advertise `SE
 | Option | Default | |
 | --- | --- | --- |
 | `entity` | — | required |
-| `name` | friendly name | |
+| `title` | the entity's friendly name | what the card calls it |
+| `name` | — | the older spelling of `title`; still works |
 | `icon` | domain default | |
 | `height` | `200` | card height in px |
 | `accent` | amber / sky | any hex |
@@ -150,19 +186,23 @@ views:
             cards:
               - type: custom:nspanel-light-card
                 entity: light.dining_lights
-                height: 258
+                title: Dining table
+                height: 260
               - type: custom:nspanel-light-card
                 entity: light.kitchen_spots
-                height: 158
+                title: Kitchen spots
+                height: 184
                 show_presets: false
           - type: vertical-stack
             cards:
               - type: custom:nspanel-cover-card
                 entity: cover.blinds_living_room
-                height: 258
+                title: Living room blinds
+                height: 260
               - type: custom:nspanel-cover-card
                 entity: cover.bedroom_blackout
-                height: 158
+                title: Bedroom blackout
+                height: 184
                 show_presets: false
 ```
 

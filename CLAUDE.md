@@ -19,6 +19,10 @@ README.md                  user-facing docs: options tables, YAML examples, inst
 .github/workflows/         HACS validation + `node --check dist/nspanel-cards.js`
 dev/bench.html             preview bench: mock hass + an ha-icon stub, renders the real
                            bundle in a 480x480 frame outside Home Assistant
+dev/editor.html            harness for the GUI editor: stubs ha-form, shows the emitted
+                           config-changed payload, and runs the option sync check
+dev/serve.py               no-cache static server for both (plain http.server lets Chrome
+                           cache the bundle and render the previous build)
 dev/shots.ps1              drives headless Chrome over the bench to regenerate the README
                            screenshots
 docs/images/               those screenshots; referenced from the README
@@ -30,7 +34,7 @@ HACS's repo validation fails if the README has no images, so `docs/images/*.png`
 existing. They are real Chromium renders of the shipped bundle, never mockups:
 
 ```bash
-python -m http.server 8177        # from the repo root, then, in another shell:
+python dev/serve.py               # from the repo root, then, in another shell:
 powershell -NoProfile -File dev/shots.ps1
 ```
 
@@ -90,20 +94,45 @@ Ordered top to bottom, separated by banner comments:
    `static domain`, `static accent`, `getStubConfig`, `_entityValue`, `_build`, `_render`,
    `_commit`, `_onTap`, `_openSheet`.
 7. `NsPanelProbeCard` — standalone diagnostics element, not a `NsBaseCard`.
-8. Registration: `customElements.define`, `window.customCards` entries, `window.NsPanelCards`.
+8. `NsBaseCardEditor` + one subclass per card — the GUI editor HA builds from
+   `Card.getConfigElement()`. It renders `ha-form` (the frontend's own schema-driven form, so
+   still no dependency of ours) from `SHARED_SCHEMA`, and on every change merges the form
+   value over the previous config so keys the form does not own — `presets` above all —
+   survive a trip through the GUI. It also writes the form data back to itself after emitting
+   `config-changed`; without that the next edit ships a stale snapshot and reverts the one
+   before it.
+9. Registration: `customElements.define`, `window.customCards` entries, `window.NsPanelCards`.
 
 ### Conventions
 
 - Private members are `_`-prefixed; public API is what HA calls (`setConfig`, `hass`,
   `getCardSize`, `getLayoutOptions`, `getStubConfig`).
 - `setConfig` validates the entity and its domain, then `Object.assign`s over a literal of
-  defaults. **Any new option must be added to that defaults literal and to the options table
-  in the README.**
+  defaults. Anything a card reads from `this._config` must come from that literal — a subclass
+  cannot fill a key in after `super.setConfig()`, because the base has already run `_build()`
+  from it. That ordering bug is why `defaultPresets` is a static on the class.
+
+**An option lives in three places, and all three must agree:**
+
+1. the defaults literal in `NsBaseCard.setConfig`,
+2. the shared-options table in the README,
+3. `SHARED_SCHEMA` (plus `EDITOR_LABELS`) in the visual editor.
+
+Miss (3) and the GUI silently drops the option from any card the user edits. `dev/editor.html`
+prints a sync check that compares (1) against (3) — open it after touching options; it should
+say `ok` for both cards. `presets` and the legacy `name` are the only exempt keys.
 - Comments explain *why*, in prose, at the point where the reasoning is non-obvious. Match
   that density — this file is written to be read.
 - Single quotes, semicolons, 2-space indent, ~90 column soft wrap.
 - A new card means: a subclass, a `customElements.define`, a `window.customCards` entry, an
   export on `window.NsPanelCards`, and a README row.
+
+### The `title` option
+
+`title` is what the card calls the thing; `name` is the older spelling and still works. Both
+resolve through `_title()`, which falls back to the entity's `friendly_name` — read the
+display name through that, never from the config directly. The editor migrates `name` into
+`title` when a user touches a card in the GUI.
 
 ### Local state vs. incoming state
 

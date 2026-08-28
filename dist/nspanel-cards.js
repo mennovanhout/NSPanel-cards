@@ -33,7 +33,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.1.0';
+const NSPANEL_VERSION = '0.2.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -583,7 +583,8 @@ class NsBaseCard extends HTMLElement {
       );
     }
     this._config = Object.assign({
-      name: null,
+      title: null,
+      name: null,            // the original spelling of title; still honoured
       icon: null,
       height: 200,
       accent: null,
@@ -595,9 +596,14 @@ class NsBaseCard extends HTMLElement {
       haptics: true,
       swipe_safe: true,        // release horizontal drags back to the page
       show_presets: true,
-      tap_action: 'toggle',
       long_press: 'sheet',
     }, config);
+    // Presets have to be settled here, not in a subclass after super() returns:
+    // _build() below reads them, so a config without a `presets` key - which is
+    // what getStubConfig and the GUI editor both hand over - used to throw.
+    if (!Array.isArray(this._config.presets)) {
+      this._config.presets = this.constructor.defaultPresets;
+    }
     this._built = false;
     if (this.shadowRoot) this._build();
     if (this._hass) this._sync(true);
@@ -617,6 +623,14 @@ class NsBaseCard extends HTMLElement {
 
   get hass() { return this._hass; }
 
+  /* HA asks the class for its GUI editor; each card registers one under its
+     own tag. See the editor section near the bottom of this file. */
+  static getConfigElement() { return document.createElement(this.cardType + '-editor'); }
+
+  /* Overridden per card; the base has none so the subclass list is the only
+     place a card's own defaults live. */
+  static get defaultPresets() { return []; }
+
   getCardSize() { return Math.max(2, Math.round(this._config.height / 50)); }
   getLayoutOptions() { return { grid_rows: this.getCardSize(), grid_columns: 6 }; }
 
@@ -631,6 +645,14 @@ class NsBaseCard extends HTMLElement {
 
   _accent() {
     return this._config.accent || this.constructor.accent;
+  }
+
+  /* What the card calls the thing. `title` wins, `name` is the older spelling
+     of the same option, and the entity's friendly_name is the fallback - which
+     is why a card with no title says "Dining table" and not "dining lights". */
+  _title() {
+    const s = this._stateObj;
+    return this._config.title || this._config.name || friendly(s, this._config.entity);
   }
 
   /* Value currently on screen: the local drag value wins while it is fresh,
@@ -792,9 +814,8 @@ class NsPanelLightCard extends NsBaseCard {
     return { entity: found || 'light.example', height: 200 };
   }
 
-  setConfig(config) {
-    super.setConfig(config);
-    this._config.presets = Array.isArray(config.presets) ? config.presets : [
+  static get defaultPresets() {
+    return [
       { name: 'Low', brightness_pct: 15 },
       { name: 'Mid', brightness_pct: 50 },
       { name: 'Full', brightness_pct: 100 },
@@ -902,7 +923,7 @@ class NsPanelLightCard extends NsBaseCard {
       run: () => this._call('light', 'toggle'),
     });
     sheet().open({
-      title: this._config.name || friendly(s, this._config.entity),
+      title: this._title(),
       state: isOn(s) ? 'On' : 'Off',
       value: this._displayValue(),
       accent: this._accent(),
@@ -935,7 +956,7 @@ class NsPanelLightCard extends NsBaseCard {
 
     this._elIcon.setAttribute('icon',
       cfg.icon || (s && s.attributes.icon) || (on ? 'mdi:lightbulb-on' : 'mdi:lightbulb-outline'));
-    this._elName.textContent = cfg.name || friendly(s, cfg.entity);
+    this._elName.textContent = this._title();
 
     if (this._valueShown !== pct || this._onShown !== on) {
       this._valueShown = pct;
@@ -962,10 +983,8 @@ class NsPanelCoverCard extends NsBaseCard {
     return { entity: found || 'cover.example', height: 200 };
   }
 
-  setConfig(config) {
-    super.setConfig(config);
-    this._config.show_presets = config.show_presets !== false;
-    this._config.presets = Array.isArray(config.presets) ? config.presets : [
+  static get defaultPresets() {
+    return [
       { name: 'Open', position: 100 },
       { name: 'Half', position: 50 },
       { name: 'Shut', position: 0 },
@@ -1081,7 +1100,7 @@ class NsPanelCoverCard extends NsBaseCard {
   _openSheet() {
     const s = this._stateObj;
     sheet().open({
-      title: this._config.name || friendly(s, this._config.entity),
+      title: this._title(),
       state: this._stateText(s, Math.round(this._displayValue() * 100)),
       value: this._displayValue(),
       fromTop: true,
@@ -1131,7 +1150,7 @@ class NsPanelCoverCard extends NsBaseCard {
 
     this._elIcon.setAttribute('icon', cfg.icon || (s && s.attributes.icon) ||
       (pct >= 99 ? 'mdi:blinds-open' : pct <= 0 ? 'mdi:blinds' : 'mdi:blinds-horizontal'));
-    this._elName.textContent = cfg.name || friendly(s, cfg.entity);
+    this._elName.textContent = this._title();
 
     if (this._valueShown !== pct || this._movingShown !== moving) {
       this._valueShown = pct;
@@ -1243,6 +1262,164 @@ class NsPanelProbeCard extends HTMLElement {
   }
 }
 
+
+/* ================================================================== *
+ * Visual editor
+ *
+ * HA calls Card.getConfigElement() to build the GUI editor behind the
+ * dashboard's pencil. The form is driven by ha-form, the frontend's own
+ * schema-rendered form, so the controls are the ones HA users already know
+ * (entity picker, icon picker, switches) and this file still ships no
+ * dependencies of its own.
+ *
+ * KEEP IN SYNC: every option in NsBaseCard.setConfig's defaults literal and in
+ * the README's shared-options table needs a row in SHARED_SCHEMA below, or the
+ * GUI will silently drop it. The three lists are one list in three places.
+ *
+ * `presets` is deliberately absent - it is a list of objects, which ha-form has
+ * no control for. The editor says so and leaves that key untouched, so
+ * switching to the GUI never destroys presets written in YAML.
+ * ================================================================== */
+
+const EDITOR_LABELS = {
+  entity: 'Entity',
+  title: 'Title',
+  icon: 'Icon',
+  height: 'Height (px)',
+  accent: 'Accent colour (hex)',
+  show_presets: 'Show presets',
+  live: 'Update while dragging',
+  echo_ms: 'Ignore state echo (ms)',
+  drag_travel: 'Drag travel (px, 0 = card height)',
+  swipe_safe: 'Let sideways drags change page',
+  long_press: 'Long press',
+  long_press_ms: 'Long press (ms)',
+  step: 'Step for the +/- buttons',
+  haptics: 'Haptics',
+};
+
+/* The options every card takes. The entity row is prepended per card, because
+   its picker is filtered to that card's domain. */
+const SHARED_SCHEMA = [
+  { name: 'title', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'icon', selector: { icon: {} } },
+      { name: 'height', selector: { number: { min: 60, max: 480, step: 2, mode: 'box' } } },
+    ],
+  },
+  { name: 'accent', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'show_presets', selector: { boolean: {} } },
+      { name: 'haptics', selector: { boolean: {} } },
+      { name: 'live', selector: { boolean: {} } },
+      { name: 'swipe_safe', selector: { boolean: {} } },
+    ],
+  },
+  {
+    name: '', type: 'grid', schema: [
+      {
+        name: 'long_press',
+        selector: { select: { mode: 'dropdown', options: [
+          { value: 'sheet', label: 'Full-screen control' },
+          { value: 'none', label: 'Nothing' },
+        ] } },
+      },
+      { name: 'long_press_ms', selector: { number: { min: 200, max: 2000, step: 50, mode: 'box' } } },
+      { name: 'step', selector: { number: { min: 1, max: 50, step: 1, mode: 'box' } } },
+      { name: 'echo_ms', selector: { number: { min: 0, max: 10000, step: 100, mode: 'box' } } },
+      { name: 'drag_travel', selector: { number: { min: 0, max: 1000, step: 10, mode: 'box' } } },
+    ],
+  },
+];
+
+class NsBaseCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this.shadowRoot.innerHTML = `
+      <style>
+        .note {
+          color: var(--secondary-text-color, #8a8a8a);
+          font-size: 12px;
+          line-height: 1.45;
+          padding: 12px 4px 0;
+        }
+        code { font-size: 12px; }
+      </style>
+      <ha-form></ha-form>
+      <div class="note">
+        Presets are a list, which this form cannot draw. Edit them in YAML - the
+        GUI leaves them alone.
+      </div>
+    `;
+    this._form = this.shadowRoot.querySelector('ha-form');
+    this._form.computeLabel = (schema) => EDITOR_LABELS[schema.name] || schema.name;
+    this._form.addEventListener('value-changed', (e) => this._valueChanged(e));
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._push();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._form.hass = hass;
+  }
+
+  get _schema() {
+    return [
+      {
+        name: 'entity',
+        required: true,
+        selector: { entity: { domain: this.constructor.domain } },
+      },
+    ].concat(SHARED_SCHEMA);
+  }
+
+  /* `name` was the old spelling of `title`. Show it in the title box so the
+     value is not invisible in the GUI; writing back stores `title`. */
+  _push() {
+    const c = this._config;
+    this._form.schema = this._schema;
+    this._form.data = Object.assign({}, c, {
+      title: c.title || c.name || '',
+    });
+  }
+
+  _valueChanged(e) {
+    e.stopPropagation();
+    const value = e.detail.value || {};
+    // Start from the old config so keys the form does not own - presets above
+    // all - survive a trip through the GUI.
+    const config = Object.assign({}, this._config, value);
+    delete config.name;                       // migrated into title by _push
+    Object.keys(config).forEach((k) => {
+      if (config[k] === '' || config[k] === undefined || config[k] === null) delete config[k];
+    });
+    config.type = this._config.type || ('custom:' + this.constructor.cardType);
+    this._config = config;
+    // Feed the new config straight back into the form. HA normally re-calls
+    // setConfig after a config-changed, but not reliably enough to lean on: if
+    // the form keeps its first snapshot, the next edit ships that stale copy
+    // and silently reverts the field edited before it.
+    this._push();
+    fireEvent(this, 'config-changed', { config });
+  }
+}
+
+class NsPanelLightCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-light-card'; }
+  static get domain() { return 'light'; }
+}
+
+class NsPanelCoverCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-cover-card'; }
+  static get domain() { return 'cover'; }
+}
+
 /* ================================================================== *
  * registration
  * ================================================================== */
@@ -1250,6 +1427,8 @@ class NsPanelProbeCard extends HTMLElement {
 customElements.define('nspanel-light-card', NsPanelLightCard);
 customElements.define('nspanel-cover-card', NsPanelCoverCard);
 customElements.define('nspanel-probe-card', NsPanelProbeCard);
+customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
+customElements.define('nspanel-cover-card-editor', NsPanelCoverCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push(
@@ -1282,5 +1461,7 @@ window.NsPanelCards = {
   NsPanelLightCard,
   NsPanelCoverCard,
   NsPanelProbeCard,
+  NsPanelLightCardEditor,
+  NsPanelCoverCardEditor,
   NsSheet,
 };

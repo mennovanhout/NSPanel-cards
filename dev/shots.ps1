@@ -1,7 +1,7 @@
 # Capture the README screenshots straight off a real Chromium, 480x480 -- the
 # panel's physical resolution -- from the shipped bundle in dist/.
 #
-#   1. serve the repo root:  python -m http.server 8177
+#   1. serve the repo root:  python dev/serve.py
 #   2. pwsh dev/shots.ps1
 #
 # Writes docs/images/*.png. Chromium (not a mockup) so the pictures cannot drift

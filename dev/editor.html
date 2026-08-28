@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NSPanel Cards — editor harness</title>
+<style>
+  body {
+    margin: 0; padding: 24px; background: #0b0d10; color: #f2f4f7;
+    font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; gap: 24px; align-items: flex-start;
+  }
+  .col { width: 420px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; color: #98a1b0; }
+  .box { background: #16191f; border-radius: 12px; padding: 16px; }
+  pre {
+    background: #16191f; border-radius: 12px; padding: 16px; margin: 0;
+    font-size: 12px; line-height: 1.5; white-space: pre-wrap; color: #cfd6e2;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .row label { flex: 1; font-size: 13px; color: #98a1b0; }
+  .row input, .row select { width: 190px; background: #0b0d10; color: #f2f4f7;
+    border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 5px 7px; }
+  .row input[type=checkbox] { width: auto; }
+</style>
+</head>
+<body>
+
+<div class="col">
+  <h2>nspanel-light-card editor</h2>
+  <div class="box" id="host-light"></div>
+</div>
+<div class="col">
+  <h2>last config-changed</h2>
+  <pre id="out">(edit something)</pre>
+  <h2 style="margin-top:24px">option sync check</h2>
+  <pre id="sync">…</pre>
+</div>
+
+<script src="../dist/nspanel-cards.js"></script>
+<script>
+/* ------------------------------------------------------------------ *
+ * ha-form stub. The real one lives in the HA frontend; this renders the
+ * same schema with plain inputs and fires the same value-changed event,
+ * which is enough to prove the editor's wiring: labels resolve, values
+ * round-trip, and the emitted config keeps the keys the form does not own.
+ * ------------------------------------------------------------------ */
+class HaFormStub extends HTMLElement {
+  set schema(v) { this._schema = v; this._paint(); }
+  set data(v) { this._data = v || {}; this._paint(); }
+  set hass(v) { this._hass = v; }
+
+  _flat(schema, out) {
+    (schema || []).forEach((row) => {
+      if (row.type === 'grid') this._flat(row.schema, out);
+      else out.push(row);
+    });
+    return out;
+  }
+
+  _paint() {
+    if (!this._schema || !this._data) return;
+    this.innerHTML = '';
+    this._flat(this._schema, []).forEach((row) => {
+      const sel = row.selector || {};
+      const wrap = document.createElement('div');
+      wrap.className = 'row';
+      const label = document.createElement('label');
+      label.textContent =
+        (this.computeLabel ? this.computeLabel(row) : row.name) + (row.required ? ' *' : '');
+      wrap.appendChild(label);
+
+      let input;
+      if (sel.boolean) {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = !!this._data[row.name];
+      } else if (sel.select) {
+        input = document.createElement('select');
+        sel.select.options.forEach((o) => {
+          const opt = document.createElement('option');
+          opt.value = o.value; opt.textContent = o.label;
+          input.appendChild(opt);
+        });
+        input.value = this._data[row.name] === undefined ? '' : this._data[row.name];
+      } else {
+        input = document.createElement('input');
+        input.type = sel.number ? 'number' : 'text';
+        input.value = this._data[row.name] === undefined ? '' : this._data[row.name];
+      }
+
+      input.addEventListener('change', () => {
+        let v;
+        if (sel.boolean) v = input.checked;
+        else if (sel.number) v = input.value === '' ? undefined : Number(input.value);
+        else v = input.value;
+        const value = Object.assign({}, this._data);
+        value[row.name] = v;
+        this.dispatchEvent(new CustomEvent('value-changed', {
+          detail: { value }, bubbles: true, composed: true,
+        }));
+      });
+
+      wrap.appendChild(input);
+      this.appendChild(wrap);
+    });
+  }
+}
+customElements.define('ha-form', HaFormStub);
+
+const hass = { states: { 'light.dining_lights': { entity_id: 'light.dining_lights',
+  state: 'on', attributes: { friendly_name: 'Shelly Dimmer 2 Dining' } } } };
+
+/* A config that exercises the things that can go wrong: presets the form does
+   not own, and the legacy `name` key. */
+const startConfig = {
+  type: 'custom:nspanel-light-card',
+  entity: 'light.dining_lights',
+  name: 'Legacy name',
+  height: 260,
+  presets: [{ name: 'Low', brightness_pct: 15 }],
+};
+
+const ed = window.NsPanelCards.NsPanelLightCard.getConfigElement();
+ed.hass = hass;
+ed.setConfig(startConfig);
+ed.addEventListener('config-changed', (e) => {
+  document.getElementById('out').textContent = JSON.stringify(e.detail.config, null, 2);
+});
+document.getElementById('host-light').appendChild(ed);
+window.__editor = ed;
+
+/* ------------------------------------------------------------------ *
+ * Sync check. Every option in a card's setConfig defaults needs a row
+ * in the editor's schema or the GUI drops it silently, so the harness
+ * says out loud when the two lists have drifted apart.
+ * ------------------------------------------------------------------ */
+const EDITOR_EXEMPT = ['presets', 'name'];   // list-valued; legacy alias of title
+
+function syncReport() {
+  const flat = (schema, out) => {
+    (schema || []).forEach((r) => (r.type === 'grid' ? flat(r.schema, out) : out.push(r.name)));
+    return out;
+  };
+  const lines = [];
+  [['nspanel-light-card', window.NsPanelCards.NsPanelLightCard],
+   ['nspanel-cover-card', window.NsPanelCards.NsPanelCoverCard]].forEach(([tag, cls]) => {
+    const inForm = flat(cls.getConfigElement()._schema, []);
+    const probe = document.createElement(tag);
+    document.body.appendChild(probe);
+    probe.setConfig({ type: 'custom:' + tag, entity: tag.indexOf('light') > -1 ? 'light.x' : 'cover.x' });
+    const missing = Object.keys(probe._config)
+      .filter((k) => k !== 'type' && EDITOR_EXEMPT.indexOf(k) === -1 && inForm.indexOf(k) === -1);
+    probe.remove();
+    lines.push(tag + ': ' + (missing.length ? 'MISSING FROM EDITOR -> ' + missing.join(', ') : 'ok'));
+  });
+  return lines.join(String.fromCharCode(10));
+}
+document.getElementById('sync').textContent = syncReport();
+</script>
+</body>
+</html>
