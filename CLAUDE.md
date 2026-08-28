@@ -17,8 +17,28 @@ dist/nspanel-cards.js      the entire project — hand-written source AND the sh
 hacs.json                  HACS manifest (points at the filename above)
 README.md                  user-facing docs: options tables, YAML examples, install steps
 .github/workflows/         HACS validation + `node --check dist/nspanel-cards.js`
-dev/                       empty, untracked; scratch space for a local preview bench
+dev/bench.html             preview bench: mock hass + an ha-icon stub, renders the real
+                           bundle in a 480x480 frame outside Home Assistant
+dev/shots.ps1              drives headless Chrome over the bench to regenerate the README
+                           screenshots
+docs/images/               those screenshots; referenced from the README
 ```
+
+### Regenerating the screenshots
+
+HACS's repo validation fails if the README has no images, so `docs/images/*.png` must keep
+existing. They are real Chromium renders of the shipped bundle, never mockups:
+
+```bash
+python -m http.server 8177        # from the repo root, then, in another shell:
+powershell -NoProfile -File dev/shots.ps1
+```
+
+`dev/bench.html?shot=light|cover|sheet` is the bare 480x480 capture mode the script drives;
+loading `dev/bench.html` with no query string gives the three-panel bench for eyeballing
+changes. The bench vendors the MDI path data it needs (HA's `ha-icon` does not exist outside
+HA) so it works offline — add a path to the `MDI` table there if a card starts using a new
+icon.
 
 ## There is no build step
 
@@ -33,7 +53,8 @@ node --check dist/nspanel-cards.js
 ```
 
 That is the only automated check that exists (CI runs it plus HACS validation). There is no
-test suite; behaviour is verified by loading the card on a real panel or in a browser.
+test suite; behaviour is verified by loading the card on a real panel, or in `dev/bench.html`
+(see below).
 
 ## The hardware constraint drives every decision
 
@@ -97,6 +118,15 @@ Tap toggles (on a moving cover, stops). Vertical drag adjusts relative to the cu
 over `drag_travel` px. Long-press (`long_press_ms`, 500 ms) opens the sheet. Horizontal drags
 are deliberately **released back to the page** on the first move when `swipe_safe` is on, so a
 wrapping swipe card still changes page — see `_onMove`.
+
+## HACS validation
+
+`.github/workflows/validate.yml` runs `hacs/action`. Three of its checks depend on things
+outside the code, and all three have bitten this repo:
+
+- **topics** and **description** live in the GitHub repository settings, not in any file. They
+  cannot be fixed by a commit — the repo owner sets them in the repo's About panel.
+- **images** requires at least one image in the README; see the screenshot section above.
 
 ## Versioning
 

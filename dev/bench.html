@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NSPanel Cards — preview bench</title>
+<style>
+  html, body {
+    margin: 0;
+    background: #05070a;
+    font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #98a1b0;
+  }
+  .rack {
+    display: flex;
+    gap: 28px;
+    padding: 28px;
+    align-items: flex-start;
+    width: max-content;
+  }
+  /* 480x480 is the Pro 86's physical panel. The bench pins CSS pixels to
+     physical ones so what you see here is what fits on the glass. */
+  .panel {
+    width: 480px;
+    height: 480px;
+    background: #0b0d10;
+    border-radius: 18px;
+    padding: 12px;
+    overflow: hidden;
+    position: relative;   /* sheetHost anchors to this */
+    box-sizing: border-box;
+  }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .cap { font-size: 13px; padding: 10px 2px 0; letter-spacing: .02em; }
+
+  /* ?shot=<id> renders one bare 480x480 screen and nothing else, so a headless
+     Chromium at --window-size=480,480 captures the glass 1:1. See dev/shots.ps1. */
+  body.shot { background: #0b0d10; }
+  body.shot .rack { padding: 0; gap: 0; }
+  body.shot .cap { display: none; }
+  body.shot .panel { border-radius: 0; }
+</style>
+</head>
+<body>
+
+<div class="rack">
+  <div>
+    <div class="panel" id="p-light"><div class="stack" id="s-light"></div></div>
+    <div class="cap">Lights</div>
+  </div>
+  <div>
+    <div class="panel" id="p-cover"><div class="stack" id="s-cover"></div></div>
+    <div class="cap">Covers</div>
+  </div>
+  <div>
+    <div class="panel" id="p-sheet"><div class="stack" id="s-sheet"></div></div>
+    <div class="cap">Long-press</div>
+  </div>
+</div>
+
+<!-- the shipped bundle, loaded exactly as HA loads it -->
+<script src="../dist/nspanel-cards.js"></script>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * ha-icon stub. Home Assistant supplies this element; outside HA the
+ * cards would render an empty box. The real Material Design Icons path
+ * data is vendored below (MDI 7.4.47, Apache-2.0) rather than fetched,
+ * so the bench and the screenshot script work offline and headless.
+ * ------------------------------------------------------------------ */
+const MDI = {
+  'lightbulb-on':
+    'M12,6A6,6 0 0,1 18,12C18,14.22 16.79,16.16 15,17.2V19A1,1 0 0,1 14,20H10A1,1 0 0,1 9,19V17.2C7.21,16.16 6,14.22 6,12A6,6 0 0,1 12,6M14,21V22A1,1 0 0,1 13,23H11A1,1 0 0,1 10,22V21H14M20,11H23V13H20V11M1,11H4V13H1V11M13,1V4H11V1H13M4.92,3.5L7.05,5.64L5.63,7.05L3.5,4.93L4.92,3.5M16.95,5.63L19.07,3.5L20.5,4.93L18.37,7.05L16.95,5.63Z',
+  'lightbulb-outline':
+    'M12,2A7,7 0 0,1 19,9C19,11.38 17.81,13.47 16,14.74V17A1,1 0 0,1 15,18H9A1,1 0 0,1 8,17V14.74C6.19,13.47 5,11.38 5,9A7,7 0 0,1 12,2M9,21V20H15V21A1,1 0 0,1 14,22H10A1,1 0 0,1 9,21M12,4A5,5 0 0,0 7,9C7,11.05 8.23,12.81 10,13.58V16H14V13.58C15.77,12.81 17,11.05 17,9A5,5 0 0,0 12,4Z',
+  'lightbulb-on-outline':
+    'M20,11H23V13H20V11M1,11H4V13H1V11M13,1V4H11V1H13M4.92,3.5L7.05,5.64L5.63,7.05L3.5,4.93L4.92,3.5M16.95,5.63L19.07,3.5L20.5,4.93L18.37,7.05L16.95,5.63M12,6A6,6 0 0,1 18,12C18,14.22 16.79,16.16 15,17.2V19A1,1 0 0,1 14,20H10A1,1 0 0,1 9,19V17.2C7.21,16.16 6,14.22 6,12A6,6 0 0,1 12,6M14,21V22A1,1 0 0,1 13,23H11A1,1 0 0,1 10,22V21H14M11,18H13V15.87C14.73,15.43 16,13.86 16,12A4,4 0 0,0 12,8A4,4 0 0,0 8,12C8,13.86 9.27,15.43 11,15.87V18Z',
+  'lightbulb-off':
+    'M12,2C9.76,2 7.78,3.05 6.5,4.68L16.31,14.5C17.94,13.21 19,11.24 19,9A7,7 0 0,0 12,2M3.28,4L2,5.27L5.04,8.3C5,8.53 5,8.76 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H14.73L18.73,22L20,20.72L3.28,4M9,20V21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9Z',
+  'blinds-open':
+    'M3 2H21C21.55 2 22 2.45 22 3V5C22 5.55 21.55 6 21 6H20V7C20 7.55 19.55 8 19 8H13V10.17C14.17 10.58 15 11.7 15 13C15 14.66 13.66 16 12 16C10.34 16 9 14.66 9 13C9 11.69 9.84 10.58 11 10.17V8H5C4.45 8 4 7.55 4 7V6H3C2.45 6 2 5.55 2 5V3C2 2.45 2.45 2 3 2M12 12C11.45 12 11 12.45 11 13C11 13.55 11.45 14 12 14C12.55 14 13 13.55 13 13C13 12.45 12.55 12 12 12Z',
+  'blinds':
+    'M3,2H21A1,1 0 0,1 22,3V5A1,1 0 0,1 21,6H20V13A1,1 0 0,1 19,14H13V16.17C14.17,16.58 15,17.69 15,19A3,3 0 0,1 12,22A3,3 0 0,1 9,19C9,17.69 9.83,16.58 11,16.17V14H5A1,1 0 0,1 4,13V6H3A1,1 0 0,1 2,5V3A1,1 0 0,1 3,2M12,18A1,1 0 0,0 11,19A1,1 0 0,0 12,20A1,1 0 0,0 13,19A1,1 0 0,0 12,18Z',
+  'blinds-horizontal':
+    'M20 19V3H4V19H2V21H22V19H20M16 9H18V11H16V9M14 11H6V9H14V11M18 7H16V5H18V7M14 5V7H6V5H14M6 19V13H14V14.82C13.55 15.14 13.25 15.66 13.25 16.25C13.25 17.22 14.03 18 15 18S16.75 17.22 16.75 16.25C16.75 15.66 16.45 15.13 16 14.82V13H18V19H6Z',
+  'arrow-up':
+    'M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z',
+  'arrow-down':
+    'M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z',
+  'stop':
+    'M18,18H6V6H18V18Z',
+};
+
+class HaIcon extends HTMLElement {
+  static get observedAttributes() { return ['icon']; }
+  connectedCallback() { this._paint(); }
+  attributeChangedCallback() { this._paint(); }
+  _paint() {
+    const name = (this.getAttribute('icon') || '').replace('mdi:', '');
+    if (!name || name === this._shown) return;
+    this._shown = name;
+    const d = MDI[name];
+    if (!d) { console.warn('bench: no vendored icon for', name); return; }
+    const size = getComputedStyle(this).getPropertyValue('--mdc-icon-size').trim() || '24px';
+    this.style.display = 'inline-flex';
+    this.style.width = size;
+    this.style.height = size;
+    this.innerHTML =
+      '<svg viewBox="0 0 24 24" style="width:100%;height:100%;fill:currentColor">' +
+      '<path d="' + d + '"></path></svg>';
+  }
+}
+customElements.define('ha-icon', HaIcon);
+
+/* ------------------------------------------------------------------ *
+ * Mock hass. The cards only ever touch states + callService.
+ * ------------------------------------------------------------------ */
+const hass = {
+  states: {
+    'light.dining_lights': {
+      entity_id: 'light.dining_lights',
+      state: 'on',
+      attributes: { friendly_name: 'Dining table', brightness: 173 },
+    },
+    'light.kitchen_spots': {
+      entity_id: 'light.kitchen_spots',
+      state: 'off',
+      attributes: { friendly_name: 'Kitchen spots' },
+    },
+    'cover.blinds_living_room': {
+      entity_id: 'cover.blinds_living_room',
+      state: 'open',
+      attributes: {
+        friendly_name: 'Living room blinds',
+        current_position: 62,
+        supported_features: 15,
+      },
+    },
+    'cover.bedroom_blackout': {
+      entity_id: 'cover.bedroom_blackout',
+      state: 'closed',
+      attributes: {
+        friendly_name: 'Bedroom blackout',
+        current_position: 0,
+        supported_features: 15,
+      },
+    },
+  },
+  callService(domain, service, data) {
+    console.log('callService', domain + '.' + service, data);
+  },
+};
+
+function card(type, config, mount) {
+  const el = document.createElement(type);
+  el.setConfig(config);
+  el.hass = hass;
+  mount.appendChild(el);
+  return el;
+}
+
+card('nspanel-light-card', {
+  entity: 'light.dining_lights', height: 258,
+  presets: [
+    { name: 'Low', brightness_pct: 15 },
+    { name: 'Dinner', brightness_pct: 45, color_temp_kelvin: 2400 },
+    { name: 'Full', brightness_pct: 100 },
+  ],
+}, document.getElementById('s-light'));
+
+card('nspanel-light-card', {
+  entity: 'light.kitchen_spots', height: 186, show_presets: false,
+}, document.getElementById('s-light'));
+
+card('nspanel-cover-card', {
+  entity: 'cover.blinds_living_room', height: 258,
+  presets: [
+    { name: 'Open', position: 100 },
+    { name: 'Privacy', position: 35 },
+    { name: 'Shut', position: 0 },
+  ],
+}, document.getElementById('s-cover'));
+
+card('nspanel-cover-card', {
+  entity: 'cover.bedroom_blackout', height: 186, show_presets: false,
+}, document.getElementById('s-cover'));
+
+/* third panel: same light card, with the long-press sheet opened over it */
+const sheetCard = card('nspanel-light-card', {
+  entity: 'light.dining_lights', height: 258,
+  presets: [
+    { name: 'Low', brightness_pct: 15 },
+    { name: 'Dinner', brightness_pct: 45, color_temp_kelvin: 2400 },
+    { name: 'Full', brightness_pct: 100 },
+  ],
+}, document.getElementById('s-sheet'));
+card('nspanel-light-card', {
+  entity: 'light.kitchen_spots', height: 186, show_presets: false,
+}, document.getElementById('s-sheet'));
+
+/* Keep the sheet inside the simulated panel instead of over the whole page. */
+window.NsPanelCards.sheetHost = document.getElementById('p-sheet');
+
+window.openSheet = () => sheetCard._openSheet();
+
+/* ---- capture mode ---- */
+const shot = new URLSearchParams(location.search).get('shot');
+if (shot) {
+  document.body.classList.add('shot');
+  document.querySelectorAll('.rack > div').forEach((w) => {
+    if (!w.querySelector('#p-' + shot)) w.remove();
+  });
+}
+if (!shot || shot === 'sheet') {
+  window.addEventListener('load', () => setTimeout(() => window.openSheet(), 150));
+}
+</script>
+</body>
+</html>

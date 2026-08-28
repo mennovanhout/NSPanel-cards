@@ -3,15 +3,26 @@
 Lovelace cards built for one specific piece of hardware: the **Sonoff NSPanel Pro 86** — the
 3.95″ 480×480 square wall panel.
 
-> Note on model names: "86" and "120" are **wall-box millimetres, not screen sizes**. The Pro 86
-> is the square 480×480 panel. The Pro 120 is a 4.7″ 750×1334 portrait screen. These cards are
-> designed for the square one; they are fluid, so they render on the 120, but the layout is
-> tuned for a square.
-
 The panel runs a Rockchip PX30 with 2 GB of RAM and a Mali-G31, behind Android 8.1. That is
 2018-class silicon. The usual card packs are built for phones, and on this hardware their
 sliders lag, their hitboxes are small and their text is tiny. Everything here is shaped by
 the constraint.
+
+<table>
+<tr>
+<td><img src="docs/images/light.png" alt="Two light cards on a 480x480 panel: a dimmed dining light at 68% with preset buttons, and an off kitchen light" width="320"></td>
+<td><img src="docs/images/cover.png" alt="Two cover cards: living room blinds 62% open, bedroom blackout closed" width="320"></td>
+<td><img src="docs/images/sheet.png" alt="The long-press control: a full-screen absolute slider at 68%, big plus and minus buttons, preset and turn-off buttons" width="320"></td>
+</tr>
+<tr>
+<td align="center"><sub>Lights</sub></td>
+<td align="center"><sub>Covers</sub></td>
+<td align="center"><sub>Long-press</sub></td>
+</tr>
+</table>
+
+<sub>Rendered from `dist/nspanel-cards.js` at the panel's own 480×480, by
+[`dev/bench.html`](dev/bench.html) — not mockups.</sub>
 
 ## Cards
 
