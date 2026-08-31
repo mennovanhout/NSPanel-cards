@@ -30,7 +30,7 @@ the constraint.
 
 | Card | What it does |
 | --- | --- |
-| `custom:nspanel-light-card` | Brightness. Drag anywhere, tap to toggle, long-press for the full-screen control. |
+| `custom:nspanel-light-card` | Brightness. Drag anywhere, tap to toggle, long-press for the full-screen control. The fill takes the bulb's own colour. |
 | `custom:nspanel-cover-card` | Blind/cover position. Same gestures; a tap while it is moving **stops** it. |
 | `custom:nspanel-climate-card` | Target temperature. Drag to set it, long-press for HVAC modes. Tap opens more-info rather than toggling — turning the heating off by brushing past the panel is a bad afternoon. |
 | `custom:nspanel-media-card` | Media player. Drag for volume, tap to play/pause, transport buttons on the face. |
@@ -96,7 +96,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.5.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.6.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -141,6 +141,27 @@ presets:
 
 That is the card at the top of the picture; below it is a second one with
 `show_presets: false` and `height: 184`.
+
+#### The card takes the light's colour
+
+The fill is the bulb's own colour, not a fixed accent. The top card in the picture is a 2700K
+warm white; the one below it is a colour lamp sitting on purple. Nothing to configure — Home
+Assistant reports `rgb_color` for colour-temperature lights as well as colour ones, computed
+from the kelvin, so a warm lamp tints the card warm on its own. A brightness-only or on/off
+light reports no colour and keeps the amber default.
+
+Bulb colours are not chosen to have text on them, though, and raw ones break the card at both
+ends: a white or pale light washes the fill out until the label disappears into it, and a
+saturated blue is so dark it vanishes against the card instead. So the colour is pulled into a
+usable luminance band before it is used — scaled down when too bright, mixed toward white when
+too dark. The hue survives, which is the part that matters: a blue lamp still reads blue.
+
+Setting `accent` explicitly turns this off for that card — if you picked a colour, the card
+does not argue — and `follow_color: false` turns it off while leaving the default amber.
+
+| Option | Default | |
+| --- | --- | --- |
+| `follow_color` | `true` | use the bulb's colour for the fill, the level line and the sheet |
 
 A preset takes any of `brightness_pct`, `color_temp_kelvin`, `rgb_color`, `effect`, or `scene`
 (to fire a scene instead). `brightness_pct: 0` turns the light off.
@@ -533,8 +554,8 @@ views:
                 title: Dining table
                 height: 260
               - type: custom:nspanel-light-card
-                entity: light.kitchen_spots
-                title: Kitchen spots
+                entity: light.lounge_lamp
+                title: Lounge lamp
                 height: 184
                 show_presets: false
           - type: vertical-stack

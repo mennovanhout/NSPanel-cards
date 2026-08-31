@@ -128,8 +128,15 @@ function st(entity_id, state, attributes) {
 
 const hass = {
   states: {
+    // rgb_color is what HA reports for a colour-temp light too, computed from
+    // the kelvin - so this is a 2700K warm white, not a "colour" bulb.
     'light.dining_lights': st('light.dining_lights', 'on',
-      { friendly_name: 'Shelly Dimmer 2 Dining', brightness: 173 }),
+      { friendly_name: 'Shelly Dimmer 2 Dining', brightness: 173,
+        color_mode: 'color_temp', color_temp_kelvin: 2700,
+        rgb_color: [255, 169, 87] }),
+    'light.lounge_lamp': st('light.lounge_lamp', 'on',
+      { friendly_name: 'Hue Lounge Lamp', brightness: 120,
+        color_mode: 'hs', rgb_color: [120, 96, 255] }),
     'light.kitchen_spots': st('light.kitchen_spots', 'off',
       { friendly_name: 'Kitchen Spots Relay' }),
 
@@ -240,7 +247,7 @@ card('nspanel-light-card', {
 }, document.getElementById('s-light'));
 
 card('nspanel-light-card', {
-  entity: 'light.kitchen_spots', title: 'Kitchen spots',
+  entity: 'light.lounge_lamp', title: 'Lounge lamp',
   height: 184, show_presets: false,
 }, document.getElementById('s-light'));
 

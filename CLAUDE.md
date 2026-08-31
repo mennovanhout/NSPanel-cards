@@ -175,6 +175,22 @@ volume frame, and reassigning an identical `src` makes the browser decode the im
 which is exactly the kind of thing a Mali-G31 cannot absorb. `_artShown` is what guards it; if
 you touch `_render` there, keep that guard.
 
+### Colour taken from an entity
+
+The light card paints itself in the bulb's `rgb_color` (`_tint`/`_paintTint`/`_liveAccent`).
+Two things make that safe, and both matter if another card ever does the same:
+
+- **`readableTint()` is not optional.** The fill is a tint under the card's own white text.
+  Raw bulb colours fail at both ends - a white light washes the fill out until the label is
+  invisible, a saturated blue disappears against the card - so the colour is clamped into a
+  luminance band (scaled down above 170, mixed toward white below 70). Hue survives.
+- **The custom properties are only written when the colour changes.** `_paintTint` guards on
+  `_tintShown`; without it, three `setProperty` calls land on every frame of a drag.
+
+Precedence is: an explicit `accent` in the config, then the entity's colour, then the card's
+`static accent`. `follow_color: false` skips the middle one. HA reports `rgb_color` for
+colour-temp lights too, so there is no kelvin conversion here and there should not need to be.
+
 ### A card with CSS of its own
 
 `NsInfoCard._shell()` injects `BASE_CSS + INFO_CSS + this.constructor.extraCss`. A card that

@@ -41,7 +41,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.5.0';
+const NSPANEL_VERSION = '0.6.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -84,6 +84,34 @@ function tintStops(hex) {
     strong: `rgba(${r},${g},${b},.62)`,
     weak: `rgba(${r},${g},${b},.34)`,
   };
+}
+
+/* A light's own colour, made safe to put white text on.
+ *
+ * The fill is a tint over a dark card, and the card's text sits on top of it.
+ * Raw bulb colours break that at both ends: a white or pale light washes the
+ * fill out until the text disappears into it, and a saturated blue or deep red
+ * is so dark it vanishes against the card instead. So the colour is pulled
+ * into a usable luminance band - scaled down when it is too bright, mixed
+ * toward white when it is too dark. Hue survives, which is the part that
+ * matters: a blue lamp still reads blue.
+ */
+function readableTint(rgb) {
+  let r = clamp(rgb[0], 0, 255);
+  let g = clamp(rgb[1], 0, 255);
+  let b = clamp(rgb[2], 0, 255);
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  if (lum > 170) {
+    const k = 170 / lum;
+    r *= k; g *= k; b *= k;
+  } else if (lum < 70) {
+    // Scaling up cannot help a colour that is already at full channel, so lift
+    // it toward white instead. That desaturates, which is the right trade for
+    // a deep blue on a near-black card.
+    const k = (70 - lum) / (255 - lum);
+    r += (255 - r) * k; g += (255 - g) * k; b += (255 - b) * k;
+  }
+  return [Math.round(r), Math.round(g), Math.round(b)];
 }
 
 function isOn(stateObj) {
@@ -820,6 +848,7 @@ class NsPanelLightCard extends NsBaseCard {
   static get cardType() { return 'nspanel-light-card'; }
   static get domain() { return 'light'; }
   static get accent() { return '#ffb74a'; }
+  static get defaultOptions() { return { follow_color: true }; }
 
   static getStubConfig(hass) {
     const found = hass && hass.states
@@ -841,6 +870,44 @@ class NsPanelLightCard extends NsBaseCard {
     if (!s || s.state !== 'on') return 0;
     const b = s.attributes.brightness;
     return typeof b === 'number' ? clamp(b / 255, 0, 1) : 1;
+  }
+
+  /* The colour to paint the card in: the bulb's own when it has one and is on,
+     otherwise the configured accent. An explicit `accent:` always wins - if
+     someone picked a colour, the card is not going to argue.
+     HA reports rgb_color for colour-temperature lights too, computed from the
+     kelvin, so a warm white lamp tints the card warm without any special case
+     here. A brightness-only or on/off light reports none, and keeps the amber. */
+  _tint() {
+    const cfg = this._config;
+    if (cfg.accent || cfg.follow_color === false) return null;
+    const s = this._stateObj;
+    if (!s || s.state !== 'on') return null;
+    const rgb = s.attributes.rgb_color;
+    if (!Array.isArray(rgb) || rgb.length < 3) return null;
+    if (rgb.some((c) => typeof c !== 'number')) return null;
+    return readableTint(rgb);
+  }
+
+  /* What the sheet and the fill should use right now. */
+  _liveAccent() {
+    const t = this._tint();
+    return t ? `rgb(${t[0]},${t[1]},${t[2]})` : this._accent();
+  }
+
+  /* Push the colour into the custom properties, but only when it has actually
+     changed - this runs on every frame of a drag. */
+  _paintTint() {
+    const t = this._tint();
+    const stamp = t ? t.join(',') : '';
+    if (stamp === this._tintShown) return;
+    this._tintShown = stamp;
+    const stops = t
+      ? { strong: `rgba(${t[0]},${t[1]},${t[2]},.62)`, weak: `rgba(${t[0]},${t[1]},${t[2]},.34)` }
+      : tintStops(this._accent());
+    this._card.style.setProperty('--ns-accent', t ? `rgb(${t[0]},${t[1]},${t[2]})` : this._accent());
+    this._card.style.setProperty('--ns-fill-strong', stops.strong);
+    this._card.style.setProperty('--ns-fill-weak', stops.weak);
   }
 
   _build() {
@@ -940,7 +1007,7 @@ class NsPanelLightCard extends NsBaseCard {
       title: this._title(),
       state: isOn(s) ? 'On' : 'Off',
       value: this._displayValue(),
-      accent: this._accent(),
+      accent: this._liveAccent(),
       step: this._config.step,
       actions: acts,
       onInput: (v) => {
@@ -967,6 +1034,7 @@ class NsPanelLightCard extends NsBaseCard {
 
     this._card.style.setProperty('--ns-fill', String(on && !broken ? v : 0));
     this._card.style.setProperty('--ns-fill-opacity', on && !broken ? '1' : '0');
+    this._paintTint();
 
     this._elIcon.setAttribute('icon',
       cfg.icon || (s && s.attributes.icon) || (on ? 'mdi:lightbulb-on' : 'mdi:lightbulb-outline'));
@@ -3143,6 +3211,7 @@ const EDITOR_LABELS = {
   step: 'Step for the +/- buttons',
   haptics: 'Haptics',
   more_info: 'Tap opens more-info',
+  follow_color: 'Use the light\'s own colour',
   secondary: 'Second entity (shown underneath)',
   unit: 'Unit (blank = the entity\'s own)',
   decimals: 'Decimals',
@@ -3289,6 +3358,7 @@ class NsBaseCardEditor extends HTMLElement {
 class NsPanelLightCardEditor extends NsBaseCardEditor {
   static get cardType() { return 'nspanel-light-card'; }
   static get domain() { return 'light'; }
+  static get rows() { return LIGHT_SCHEMA; }
 }
 
 class NsPanelCoverCardEditor extends NsBaseCardEditor {
@@ -3382,6 +3452,11 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
     ],
   },
   { name: 'more_info', selector: { boolean: {} } },
+]);
+
+/* The light card is the only one whose accent can come from the entity. */
+const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
+  { name: 'follow_color', selector: { boolean: {} } },
 ]);
 
 /* The media card is a control card, minus the options that make no sense for
