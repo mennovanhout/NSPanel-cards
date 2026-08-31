@@ -6,6 +6,7 @@
  *   custom:nspanel-cover-card    position, drag anywhere, long-press for more
  *   custom:nspanel-climate-card  target temperature, same gestures, modes in the sheet
  *   custom:nspanel-media-card    volume on the drag, transport on the face
+ *   custom:nspanel-button-card   scenes/scripts/automations, with real press feedback
  *   custom:nspanel-sensor-card   one reading, large
  *   custom:nspanel-sensors-card  two to four readings side by side
  *   custom:nspanel-status-card   doors/windows/locks; quiet unless something is wrong
@@ -40,7 +41,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.4.0';
+const NSPANEL_VERSION = '0.5.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1240,7 +1241,10 @@ const INFO_CSS = `
   pointer-events: auto;
 }
 .tile {
-  flex: 1 1 calc(50% - 5px);
+  /* (100% - the gaps) / columns. One rule for 1, 2 or 3 across, rather than a
+     class per width. shrink 0 or the tiles squeeze onto one row instead of
+     wrapping, and a 90px target is not a target on a wall panel. */
+  flex: 1 0 calc((100% - (var(--ns-cols, 2) - 1) * 10px) / var(--ns-cols, 2));
   min-width: 0;
   height: 62px;
   display: flex;
@@ -1259,7 +1263,6 @@ const INFO_CSS = `
   transition: transform .1s ease-out;
 }
 .tile:active { transform: scale(.97); }
-.tile.wide { flex-basis: 100%; }
 .tile.alert { background: var(--ns-accent-dim); }
 .tile ha-icon { --mdc-icon-size: 24px; color: var(--ns-muted); flex: none; }
 .tile.alert ha-icon { color: var(--ns-accent); }
@@ -1281,6 +1284,9 @@ const INFO_CSS = `
   text-overflow: ellipsis;
 }
 .tile.alert .ts { color: var(--ns-accent); }
+.grid[data-cols="3"] .tile { padding: 0 8px; gap: 8px; }
+.grid[data-cols="3"] .tile ha-icon { --mdc-icon-size: 20px; }
+.grid[data-cols="3"] .tile .tn { font-size: 14px; }
 
 /* nothing is wrong, and that is the whole message */
 .clear {
@@ -1506,10 +1512,15 @@ class NsInfoCard extends HTMLElement {
   }
 
   /* The opening of every info card's shadow DOM: tokens, height, accent. */
+  /* A card with CSS of its own returns it here; _shell puts it after INFO_CSS
+     so it can override. Forgetting this leaves a card's markup completely
+     unstyled, which looks like a layout bug rather than a missing stylesheet. */
+  static get extraCss() { return ''; }
+
   _shell(extraClass) {
     const tint = tintStops(this._accent());
     return `
-      <style>${BASE_CSS}${INFO_CSS}</style>
+      <style>${BASE_CSS}${INFO_CSS}${this.constructor.extraCss}</style>
       <div class="card info ${extraClass || ''}"
         style="--ns-height:${this._config.height}px;--ns-accent:${this._accent()};
           --ns-accent-dim:${tint.weak};
@@ -1729,6 +1740,275 @@ class NsPanelSensorsCard extends NsInfoCard {
 }
 
 /* ================================================================== *
+ * Button card - scenes, scripts, automations
+ *
+ * Every other card in this bundle reflects a state. A script or a scene has
+ * none: you press "Goodnight", the house does fifteen things over the next
+ * minute, and the entity you pressed looks exactly as it did before. So this
+ * card's whole design problem is feedback - the panel has to say "yes, that
+ * landed" itself, because the state will not say it.
+ *
+ * It does that three ways: the press scales the button (transform, so it is
+ * free), a haptic fires, and the button holds an accent tick for a second and
+ * a bit afterwards. A script that does report `on` while it runs keeps the
+ * accent for as long as it is running.
+ *
+ * The other half of the problem is misfires. "Goodnight" at four in the
+ * afternoon is a genuinely annoying thing to do to a household, and a wall
+ * panel is exactly the sort of thing people brush past. `confirm: true` makes
+ * a button ask for a second tap.
+ * ================================================================== */
+
+const BUTTON_CSS = `
+.pad {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: stretch;
+  pointer-events: auto;
+}
+.btn {
+  /* (100% - the gaps) / columns, and shrink 0 - otherwise four buttons squeeze
+     onto one row instead of wrapping, and a 60px-wide target is not a target
+     on a wall panel. */
+  flex: 1 0 calc((100% - (var(--ns-cols, 2) - 1) * 10px) / var(--ns-cols, 2));
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--ns-surface-2);
+  color: var(--ns-text);
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform .1s ease-out;
+}
+.btn:active { transform: scale(.96); }
+.btn ha-icon { --mdc-icon-size: 40px; color: var(--ns-muted); flex: none; }
+.btn .bl {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: -0.01em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* fired, running, or waiting for the second tap - all three are "this button
+   is what you are dealing with right now" */
+.btn.hot { background: var(--ns-accent-dim); }
+.btn.hot ha-icon, .btn.hot .bl { color: var(--ns-accent); }
+.btn.ask .bl { color: var(--ns-accent); }
+/* three across is narrow; shrink to stay readable rather than clipped */
+.pad[data-cols="3"] .btn ha-icon { --mdc-icon-size: 32px; }
+.pad[data-cols="3"] .btn .bl { font-size: 15px; line-height: 19px; }
+.btn[disabled] { opacity: .45; }
+`;
+
+/* What to call for a bare entity, by domain. Anything not listed toggles,
+   which is the right answer for lights, switches, fans and input_booleans. */
+const BUTTON_SERVICE = {
+  script: ['script', 'turn_on'],
+  scene: ['scene', 'turn_on'],
+  automation: ['automation', 'trigger'],
+  button: ['button', 'press'],
+  input_button: ['input_button', 'press'],
+  vacuum: ['vacuum', 'start'],
+};
+
+const BUTTON_ICONS = {
+  script: 'mdi:script-text-outline',
+  scene: 'mdi:palette-outline',
+  automation: 'mdi:robot-outline',
+};
+
+class NsPanelButtonCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-button-card'; }
+  static get extraCss() { return BUTTON_CSS; }
+  static get requiresEntity() { return false; }
+  static get accent() { return '#8ddba4'; }
+  static get defaultOptions() {
+    return {
+      buttons: [], columns: 2, haptics: true, confirm: false,
+      confirm_text: 'Tap again', feedback_ms: 1200, more_info: true,
+    };
+  }
+
+  /* 1, 2 or 3 across; a lone button always takes the whole card, because a
+     half-width button with empty space beside it just looks like a mistake. */
+  get _columns() {
+    if (this._items.length === 1) return 1;
+    return clamp(Math.round(this._config.columns) || 2, 1, 3);
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('script.') === 0 ||
+          e.indexOf('scene.') === 0)
+      : null;
+    return { entity: found || 'script.example', height: 140 };
+  }
+
+  setConfig(config) {
+    super.setConfig(config);
+    if (!this._items.length) {
+      throw new Error(
+        `${this.constructor.cardType}: needs an "entity", or "buttons" with at least one`);
+    }
+  }
+
+  /* One button from `entity`, or a list from `buttons`. The shorthand exists
+     because a single big button is the common case and should not need a
+     list to say so. */
+  get _items() {
+    const cfg = this._config;
+    const list = Array.isArray(cfg.buttons) && cfg.buttons.length
+      ? cfg.buttons
+      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon }] : []);
+    return list
+      .map((it) => (typeof it === 'string' ? { entity: it } : it))
+      .filter((it) => it && (it.entity || it.service))
+      .slice(0, 6);
+  }
+
+  _entityIds() { return this._items.map((i) => i.entity).filter(Boolean); }
+
+  _teardown() {
+    (this._timers || []).forEach((t) => clearTimeout(t));
+    this._timers = [];
+  }
+
+  _later(fn, ms) {
+    this._timers = this._timers || [];
+    const t = setTimeout(fn, ms);
+    this._timers.push(t);
+    return t;
+  }
+
+  _label(item) {
+    const s = item.entity ? this._state(item.entity) : null;
+    return item.name || friendly(s, item.entity) || 'Run';
+  }
+
+  _icon(item) {
+    const s = item.entity ? this._state(item.entity) : null;
+    if (item.icon) return item.icon;
+    if (s && s.attributes && s.attributes.icon) return s.attributes.icon;
+    const domain = item.entity ? item.entity.split('.')[0] : '';
+    return BUTTON_ICONS[domain] || 'mdi:gesture-tap-button';
+  }
+
+  _fire(item) {
+    const parts = item.service ? item.service.split('.') : null;
+    const byDomain = item.entity ? BUTTON_SERVICE[item.entity.split('.')[0]] : null;
+    const domain = parts ? parts[0] : (byDomain ? byDomain[0] : 'homeassistant');
+    const service = parts ? parts[1] : (byDomain ? byDomain[1] : 'toggle');
+    const data = Object.assign({}, item.data || {});
+    if (item.entity && !data.entity_id) data.entity_id = item.entity;
+    if (this._hass) this._hass.callService(domain, service, data);
+  }
+
+  _press(b) {
+    if (this._config.haptics) haptic(this, 'light');
+
+    // confirm: the first tap arms, the second fires. The armed state times out
+    // on its own so a half-pressed button never sits there waiting.
+    const wants = b.item.confirm === undefined ? this._config.confirm : b.item.confirm;
+    if (wants && !b.armed) {
+      b.armed = true;
+      b.el.classList.add('ask');
+      b.label.textContent = b.item.confirm_text || this._config.confirm_text;
+      this._later(() => {
+        b.armed = false;
+        b.el.classList.remove('ask');
+        this._scheduleRender();
+      }, 3000);
+      return;
+    }
+    b.armed = false;
+    b.el.classList.remove('ask');
+
+    this._fire(b.item);
+
+    // The acknowledgement. Nothing in the state will confirm this for us.
+    b.fired = true;
+    b.el.classList.add('hot');
+    this._later(() => {
+      b.fired = false;
+      this._scheduleRender();
+    }, this._config.feedback_ms);
+    this._scheduleRender();
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="content"><div class="pad"></div></div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    const pad = this.shadowRoot.querySelector('.pad');
+    const items = this._items;
+    pad.style.setProperty('--ns-cols', String(this._columns));
+    pad.setAttribute('data-cols', String(this._columns));
+
+    this._btns = items.map((item) => {
+      const el = document.createElement('button');
+      el.className = 'btn';
+      el.innerHTML = '<ha-icon></ha-icon><div class="bl"></div>';
+      const b = {
+        item, el,
+        icon: el.querySelector('ha-icon'),
+        label: el.querySelector('.bl'),
+        armed: false,
+        fired: false,
+      };
+      el.addEventListener('click', () => this._press(b));
+      // A long-press opens more-info on the entity behind the button, which is
+      // where you go to find out why the scene did not do what you expected.
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (item.entity && this._config.more_info) moreInfo(this, item.entity);
+      });
+      pad.appendChild(el);
+      return b;
+    });
+  }
+
+  _render() {
+    if (!this._btns) return;
+    this._btns.forEach((b) => {
+      const s = b.item.entity ? this._state(b.item.entity) : null;
+      const running = !!s && s.state === 'on' && b.item.entity.indexOf('script.') === 0;
+      // Not isBroken(): that counts `unknown` as broken, which is the normal
+      // resting state of a scene or a button that has never been fired. Only a
+      // missing or unavailable entity is actually a dead button.
+      const broken = b.item.entity ? (!s || s.state === 'unavailable') : false;
+
+      b.el.classList.toggle('hot', b.fired || running);
+      if (broken) b.el.setAttribute('disabled', ''); else b.el.removeAttribute('disabled');
+
+      const icon = broken ? 'mdi:alert-circle-outline'
+        : (b.fired ? 'mdi:check' : this._icon(b.item));
+      b.icon.setAttribute('icon', icon);
+      if (!b.armed) b.label.textContent = this._label(b.item);
+    });
+  }
+}
+
+/* ================================================================== *
  * Status card - is the house alright?
  *
  * Quiet when everything is normal, loud when it is not. With only_problems
@@ -1754,6 +2034,12 @@ class NsPanelStatusCard extends NsInfoCard {
   static get accent() { return '#f0a03c'; }
   static get defaultOptions() {
     return { entities: [], only_problems: false, columns: 2, all_clear: 'All clear' };
+  }
+
+  /* 1, 2 or 3 across. More than 3 on a 480px panel is a list of things you
+     cannot read, let alone hit. */
+  get _columns() {
+    return clamp(Math.round(this._config.columns) || 2, 1, 3);
   }
 
   static getStubConfig(hass) {
@@ -1821,6 +2107,8 @@ class NsPanelStatusCard extends NsInfoCard {
     `;
     this._card = this.shadowRoot.querySelector('.card');
     this._grid = this.shadowRoot.querySelector('.grid');
+    this._grid.style.setProperty('--ns-cols', String(this._columns));
+    this._grid.setAttribute('data-cols', String(this._columns));
     this._clear = this.shadowRoot.querySelector('.clear');
     this._clear.querySelector('div').textContent = this._config.all_clear;
 
@@ -1828,7 +2116,7 @@ class NsPanelStatusCard extends NsInfoCard {
     // on each state change would be the one expensive thing this card could do.
     this._tiles = this._items.map((item) => {
       const el = document.createElement('button');
-      el.className = 'tile' + (this._config.columns === 1 ? ' wide' : '');
+      el.className = 'tile';
       el.innerHTML = '<ha-icon></ha-icon><div class="tt">' +
         '<div class="tn"></div><div class="ts"></div></div>';
       el.addEventListener('click', () => {
@@ -2873,6 +3161,10 @@ const EDITOR_LABELS = {
   show_seconds: 'Show seconds',
   show_art: 'Show album art',
   show_transport: 'Show transport buttons',
+  confirm: 'Ask for a second tap',
+  confirm_text: 'Text while waiting for it',
+  feedback_ms: 'Hold the tick for (ms)',
+  haptics: 'Haptics',
 };
 
 /* The options every card takes. The entity row is prepended per card, because
@@ -3039,7 +3331,7 @@ const STATUS_SCHEMA = INFO_SCHEMA.concat([
   {
     name: '', type: 'grid', schema: [
       { name: 'only_problems', selector: { boolean: {} } },
-      { name: 'columns', selector: { number: { min: 1, max: 2, step: 1, mode: 'box' } } },
+      { name: 'columns', selector: { number: { min: 1, max: 3, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'all_clear', selector: { text: {} } },
@@ -3104,6 +3396,29 @@ const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
   },
 ]);
 
+/* The button card's entity row is the one-button shorthand; a list of buttons
+   is YAML, like every other list here. */
+const BUTTON_SCHEMA = [
+  { name: 'title', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'icon', selector: { icon: {} } },
+      { name: 'height', selector: { number: { min: 60, max: 480, step: 2, mode: 'box' } } },
+    ],
+  },
+  { name: 'accent', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'columns', selector: { number: { min: 1, max: 3, step: 1, mode: 'box' } } },
+      { name: 'feedback_ms', selector: { number: { min: 0, max: 5000, step: 100, mode: 'box' } } },
+      { name: 'confirm', selector: { boolean: {} } },
+      { name: 'haptics', selector: { boolean: {} } },
+      { name: 'more_info', selector: { boolean: {} } },
+    ],
+  },
+  { name: 'confirm_text', selector: { text: {} } },
+];
+
 const LIST_NOTE = 'Entities are a list, which this form cannot draw. Edit them in ' +
   'YAML - the GUI leaves them alone.';
 
@@ -3120,6 +3435,16 @@ class NsPanelMediaCardEditor extends NsBaseCardEditor {
   static get note() {
     return 'Presets on this card are favourites - a source, or a media id to play. ' +
       'They are a list, so edit them in YAML; the GUI leaves them alone.';
+  }
+}
+
+class NsPanelButtonCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-button-card'; }
+  static get entityRequired() { return false; }
+  static get rows() { return BUTTON_SCHEMA; }
+  static get note() {
+    return 'One entity here is the single-button shorthand. For several buttons use ' +
+      'a `buttons:` list in YAML - the GUI leaves it alone.';
   }
 }
 
@@ -3175,6 +3500,7 @@ customElements.define('nspanel-cover-card', NsPanelCoverCard);
 customElements.define('nspanel-probe-card', NsPanelProbeCard);
 customElements.define('nspanel-climate-card', NsPanelClimateCard);
 customElements.define('nspanel-media-card', NsPanelMediaCard);
+customElements.define('nspanel-button-card', NsPanelButtonCard);
 customElements.define('nspanel-sensor-card', NsPanelSensorCard);
 customElements.define('nspanel-sensors-card', NsPanelSensorsCard);
 customElements.define('nspanel-status-card', NsPanelStatusCard);
@@ -3185,6 +3511,7 @@ customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
 customElements.define('nspanel-cover-card-editor', NsPanelCoverCardEditor);
 customElements.define('nspanel-climate-card-editor', NsPanelClimateCardEditor);
 customElements.define('nspanel-media-card-editor', NsPanelMediaCardEditor);
+customElements.define('nspanel-button-card-editor', NsPanelButtonCardEditor);
 customElements.define('nspanel-sensor-card-editor', NsPanelSensorCardEditor);
 customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
 customElements.define('nspanel-status-card-editor', NsPanelStatusCardEditor);
@@ -3215,6 +3542,12 @@ window.customCards.push(
     type: 'nspanel-media-card',
     name: 'NSPanel Media',
     description: 'Media player for the NSPanel Pro 86. Drag for volume, tap to play or pause.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-button-card',
+    name: 'NSPanel Button',
+    description: 'Scenes, scripts and automations. Big targets, and it tells you the tap landed.',
     preview: true,
   },
   {
@@ -3266,6 +3599,7 @@ window.NsPanelCards = {
   NsPanelProbeCard,
   NsPanelClimateCard,
   NsPanelMediaCard,
+  NsPanelButtonCard,
   NsPanelSensorCard,
   NsPanelSensorsCard,
   NsPanelStatusCard,
@@ -3276,6 +3610,7 @@ window.NsPanelCards = {
   NsPanelCoverCardEditor,
   NsPanelClimateCardEditor,
   NsPanelMediaCardEditor,
+  NsPanelButtonCardEditor,
   NsPanelSensorCardEditor,
   NsPanelSensorsCardEditor,
   NsPanelStatusCardEditor,

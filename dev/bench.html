@@ -69,6 +69,10 @@
     <div class="cap">Sensors</div>
   </div>
   <div>
+    <div class="panel" id="p-scenes"><div class="stack" id="s-scenes"></div></div>
+    <div class="cap">Buttons</div>
+  </div>
+  <div>
     <div class="panel" id="p-status"><div class="stack" id="s-status"></div></div>
     <div class="cap">Status</div>
   </div>
@@ -200,6 +204,13 @@ const hass = {
           '<circle cx="112" cy="48" r="26" fill="rgba(255,255,255,.35)"/></svg>'),
         supported_features: 1 | 4 | 16 | 32 | 4096 | 16384 }),
 
+    'script.goodnight': st('script.goodnight', 'off', { friendly_name: 'Goodnight' }),
+    'script.good_morning': st('script.good_morning', 'off',
+      { friendly_name: 'Good morning' }),
+    'scene.movie': st('scene.movie', 'unknown', { friendly_name: 'Movie' }),
+    'script.leaving': st('script.leaving', 'on',          // mid-run, so it reads as active
+      { friendly_name: 'Leaving' }),
+
     'calendar.family': st('calendar.family', 'on',
       { friendly_name: 'Family', message: 'Bin day · 07:30' }),
   },
@@ -312,6 +323,26 @@ card('nspanel-sensor-card', {
   entity: 'sensor.living_temp', title: 'Living room', height: 222,
   secondary: 'sensor.living_hum',
 }, document.getElementById('s-info'));
+
+card('nspanel-button-card', {
+  height: 300, columns: 2,
+  buttons: [
+    { entity: 'script.goodnight', name: 'Goodnight', icon: 'mdi:weather-night',
+      confirm: true },
+    { entity: 'script.good_morning', name: 'Good morning', icon: 'mdi:weather-sunset' },
+    { entity: 'scene.movie', name: 'Movie', icon: 'mdi:sofa-outline' },
+    { entity: 'script.leaving', name: 'Leaving', icon: 'mdi:lock' },
+  ],
+}, document.getElementById('s-scenes'));
+
+card('nspanel-button-card', {
+  height: 144, columns: 3,
+  buttons: [
+    { entity: 'script.goodnight', name: 'Night', icon: 'mdi:weather-night' },
+    { entity: 'scene.movie', name: 'Movie', icon: 'mdi:sofa-outline' },
+    { entity: 'script.leaving', name: 'Leaving', icon: 'mdi:lock' },
+  ],
+}, document.getElementById('s-scenes'));
 
 card('nspanel-status-card', {
   title: 'House', height: 444,

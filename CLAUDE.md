@@ -16,6 +16,8 @@ Cards, in two families:
 - **Information** (`NsInfoCard`): `nspanel-sensor-card`, `nspanel-sensors-card`,
   `nspanel-status-card`, `nspanel-weather-card`, `nspanel-clock-card`. Read-only, often several
   entities, tap opens more-info.
+- **Actions** (`NsInfoCard` too, since it needs the multi-entity diff and the timers but no
+  drag): `nspanel-button-card`. Scenes, scripts, automations.
 - `nspanel-probe-card` is neither — a standalone diagnostics element.
 
 ## Repo layout
@@ -48,8 +50,8 @@ powershell -NoProfile -File dev/shots.ps1
 ```
 
 `dev/bench.html?shot=<id>` is the bare 480x480 capture mode the script drives - ids are
-`light`, `cover`, `sheet`, `climate`, `media`, `info`, `status`, `sky`, one per panel in the
-bench.
+`light`, `cover`, `sheet`, `climate`, `media`, `info`, `scenes`, `status`, `sky`, one per
+panel in the bench.
 Loading `dev/bench.html` with no query string gives the whole rack for eyeballing changes.
 
 HA's `ha-icon` does not exist outside HA, so the bench stubs it against `dev/mdi-icons.js`.
@@ -137,8 +139,8 @@ Ordered top to bottom, separated by banner comments:
 
 Miss (3) and the GUI silently drops the option from any card the user edits. `dev/editor.html`
 prints a sync check comparing (1) against (3) for **every** card - open it after touching
-options; all nine rows should say `ok`. The exempt keys are the ones `ha-form` cannot draw:
-`presets`, `entities`, `severity`, and the legacy `name`.
+options; all ten rows should say `ok`. The exempt keys are the ones `ha-form` cannot draw:
+`presets`, `entities`, `severity`, `buttons`, and the legacy `name`.
 - Comments explain *why*, in prose, at the point where the reasoning is non-obvious. Match
   that density — this file is written to be read.
 - Single quotes, semicolons, 2-space indent, ~90 column soft wrap.
@@ -172,6 +174,20 @@ a fixed 76px box, and `src` assigned **only when the URL changes**. A render hap
 volume frame, and reassigning an identical `src` makes the browser decode the image again —
 which is exactly the kind of thing a Mali-G31 cannot absorb. `_artShown` is what guards it; if
 you touch `_render` there, keep that guard.
+
+### A card with CSS of its own
+
+`NsInfoCard._shell()` injects `BASE_CSS + INFO_CSS + this.constructor.extraCss`. A card that
+brings its own stylesheet returns it from `static get extraCss()` — the button card does.
+Forget it and the markup renders completely unstyled, which reads as a broken layout rather
+than a missing stylesheet, so it costs more to diagnose than it should.
+
+### `unknown` is not broken
+
+`isBroken()` counts `unknown` as broken, which is right for a sensor and wrong for an action:
+a scene or a `button` that has never been fired sits at `unknown` forever. The button card
+therefore tests `!s || s.state === 'unavailable'` itself. Any future card over
+scenes/scripts/buttons wants the same test.
 
 ### `hidden` needs the CSS rule
 

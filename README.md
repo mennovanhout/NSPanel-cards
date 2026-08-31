@@ -35,6 +35,12 @@ the constraint.
 | `custom:nspanel-climate-card` | Target temperature. Drag to set it, long-press for HVAC modes. Tap opens more-info rather than toggling — turning the heating off by brushing past the panel is a bad afternoon. |
 | `custom:nspanel-media-card` | Media player. Drag for volume, tap to play/pause, transport buttons on the face. |
 
+**Actions** — fire and forget:
+
+| Card | What it does |
+| --- | --- |
+| `custom:nspanel-button-card` | Scenes, scripts, automations. One big button, or up to six in a 1–3 column grid. Tells you the tap landed, and can ask twice before doing something drastic. |
+
 **Information** — read-only, tap opens Home Assistant's own more-info dialog:
 
 | Card | What it does |
@@ -90,7 +96,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.4.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.5.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -253,6 +259,91 @@ makes the browser decode it again, and on a media card a render happens on every
 | `more_info` | `false` | `true` makes tap open the dialog instead of play/pause |
 | `presets` | none | favourites: `source`, `media_content_id`, `volume_pct` |
 
+### Buttons
+
+<table>
+<tr>
+<td valign="top">
+
+```yaml
+type: custom:nspanel-button-card
+height: 300
+columns: 2
+buttons:
+  - entity: script.goodnight
+    name: Goodnight
+    icon: mdi:weather-night
+    confirm: true
+  - entity: script.good_morning
+    name: Good morning
+    icon: mdi:weather-sunset
+  - entity: scene.movie
+    name: Movie
+    icon: mdi:sofa-outline
+  - entity: script.leaving
+    name: Leaving
+    icon: mdi:lock
+```
+
+</td>
+<td><img src="docs/images/scenes.png" alt="A four-button grid: Goodnight, Good morning, Movie and Leaving, with Leaving highlighted green because its script is running; below it a three-across row of the same buttons" width="300"></td>
+</tr>
+</table>
+
+For one button, skip the list:
+
+```yaml
+type: custom:nspanel-button-card
+entity: script.goodnight
+title: Goodnight
+icon: mdi:weather-night
+height: 144
+```
+
+A single button always takes the whole card. Otherwise `columns` puts 1, 2 or 3 across — the
+lower card in the picture is `columns: 3`. Six buttons is the cap; more than that on a 480px
+panel is a list of things you cannot read, let alone hit.
+
+**Every other card here reflects a state. These do not.** You press "Goodnight", the house
+does fifteen things over the next minute, and the entity you pressed looks exactly as it did
+before — so the card has to supply the acknowledgement itself. It does: the press scales the
+button, a haptic fires, and the button holds an accent tick for `feedback_ms` (1.2s). A script
+that reports `on` while it runs keeps the accent for as long as it is running, which is the
+green button in the picture.
+
+The other half of that problem is misfires. "Goodnight" at four in the afternoon is a
+genuinely annoying thing to do to a household, and a wall panel is exactly what people brush
+past. `confirm: true` makes a button ask for a second tap within three seconds, and say so
+while it waits.
+
+The service is worked out from the entity's domain — `script.turn_on`, `scene.turn_on`,
+`automation.trigger`, `button.press`, `input_button.press`, `vacuum.start`, and
+`homeassistant.toggle` for anything else, which covers lights, switches and input booleans.
+Override it per button with `service:` and optional `data:`, with or without an entity:
+
+```yaml
+buttons:
+  - name: Ping my phone
+    service: notify.mobile_app_pixel
+    data:
+      message: The panel says hello
+```
+
+A long-press on a button opens more-info for its entity, which is where you go to find out why
+the scene did not do what you expected.
+
+| Option | Default | |
+| --- | --- | --- |
+| `buttons` | — | up to 6; `entity` alone is the one-button shorthand |
+| `columns` | `2` | 1–3; a single button always fills the card |
+| `confirm` | `false` | ask for a second tap; also settable per button |
+| `confirm_text` | `Tap again` | shown while it waits |
+| `feedback_ms` | `1200` | how long the tick holds |
+| `haptics` | `true` | |
+| `more_info` | `true` | long-press opens the dialog |
+
+Per button: `entity`, `name`, `icon`, `service`, `data`, `confirm`, `confirm_text`.
+
 ### Sensor
 
 <table>
@@ -355,8 +446,8 @@ exactly the thing you want a wall panel to tell you about. Override it per entit
 `problem_when: [state, ...]`.
 
 With `only_problems: true` the card shows nothing but what is wrong, and an all-clear when
-there is nothing — which makes it the fastest card on the panel to read. `columns: 1` gives
-each tile the full width; `all_clear` sets the text.
+there is nothing — which makes it the fastest card on the panel to read. `columns` takes 1, 2
+or 3 across, the same as the button card; `all_clear` sets the text.
 
 ### Weather
 
