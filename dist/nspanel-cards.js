@@ -2204,24 +2204,25 @@ class NsPanelAlarmCard extends NsInfoCard {
   }
 
   /* Resolves to whether HA accepted it. hass.callService rejects on a
-     refused code; a mock that returns nothing counts as accepted. */
+     refused code; a mock that returns nothing counts as accepted.
+     The label is optimistic from the tap: HA sends the state_changed
+     before it answers the call, so a label set on the answer would outlive
+     the state. The state clears it, a refusal clears it, and so does twice
+     echo_ms without either. */
   _send(service, code) {
     if (!this._hass) return Promise.resolve(false);
     const data = { entity_id: this._config.entity };
     if (code !== null && code !== undefined) data.code = code;
+    this._pendingLabel = service === 'alarm_disarm' ? 'Disarming…' : 'Arming…';
+    this._scheduleRender();
+    this._later(() => { this._pendingLabel = null; this._scheduleRender(); },
+      2 * (this._config.echo_ms || 1500));
+    const refused = () => { this._pendingLabel = null; this._scheduleRender(); return false; };
     let p;
     try { p = this._hass.callService('alarm_control_panel', service, data); }
-    catch (e) { return Promise.resolve(false); }
-    const accepted = () => {
-      // optimistic, until the state moves or twice echo_ms has passed
-      this._pendingLabel = service === 'alarm_disarm' ? 'Disarming\u2026' : 'Arming\u2026';
-      this._scheduleRender();
-      this._later(() => { this._pendingLabel = null; this._scheduleRender(); },
-        2 * (this._config.echo_ms || 1500));
-      return true;
-    };
-    if (!p || typeof p.then !== 'function') return Promise.resolve(accepted());
-    return p.then(accepted, () => false);
+    catch (e) { return Promise.resolve(refused()); }
+    if (!p || typeof p.then !== 'function') return Promise.resolve(true);
+    return p.then(() => true, refused);
   }
 
   _build() {
