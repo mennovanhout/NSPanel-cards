@@ -41,7 +41,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.6.0';
+const NSPANEL_VERSION = '0.7.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -3567,6 +3567,25 @@ class NsPanelClockCardEditor extends NsBaseCardEditor {
 }
 
 /* ================================================================== *
+ * Screensaver config card
+ *
+ * Not a card: a place in the dashboard to configure the native app's
+ * screensaver (after, image_url, clock, proximity wake - see the app's
+ * README). The app reads it out of the Lovelace config and drops it from
+ * the pages. In a browser it renders nothing at all; it exists here so
+ * Lovelace does not show "custom element doesn't exist" where it sits.
+ * ================================================================== */
+
+class NsPanelScreensaverCard extends HTMLElement {
+  static getStubConfig() { return { after: 300 }; }
+  setConfig(c) { this._config = c || {}; }
+  set hass(h) { this._hass = h; }
+  getCardSize() { return 0; }
+  getLayoutOptions() { return { grid_rows: 0, grid_columns: 'full' }; }
+  connectedCallback() { this.style.display = 'none'; }
+}
+
+/* ================================================================== *
  * registration
  * ================================================================== */
 
@@ -3581,6 +3600,7 @@ customElements.define('nspanel-sensors-card', NsPanelSensorsCard);
 customElements.define('nspanel-status-card', NsPanelStatusCard);
 customElements.define('nspanel-weather-card', NsPanelWeatherCard);
 customElements.define('nspanel-clock-card', NsPanelClockCard);
+customElements.define('nspanel-screensaver', NsPanelScreensaverCard);
 
 customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
 customElements.define('nspanel-cover-card-editor', NsPanelCoverCardEditor);
@@ -3654,6 +3674,12 @@ window.customCards.push(
     name: 'NSPanel Clock',
     description: 'Time, date and an optional line from any entity. For the page a panel idles on.',
     preview: true,
+  },
+  {
+    type: 'nspanel-screensaver',
+    name: 'NSPanel Screensaver',
+    description: 'Configures the native NSPanel app\'s screensaver. Renders nothing in a browser.',
+    preview: false,
   },
   {
     type: 'nspanel-probe-card',

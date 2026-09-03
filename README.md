@@ -96,7 +96,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.6.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.7.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -593,6 +593,14 @@ An information page for the same panel:
 ```
 
 300 + 144 + the 12px gap fills a 480px panel exactly, the same way 260 + 184 does.
+
+## `custom:nspanel-screensaver`
+
+Not a card: a place in the dashboard to configure the [native app](../nspanel-app)'s
+screensaver - the photo, the wandering clock, the proximity wake. In a browser it renders
+nothing at all; it is in this bundle so Lovelace does not show "custom element doesn't exist"
+where it sits. Put it at the end of a vertical-stack rather than as its own page of a swipe
+card, or the browser gets a blank page. All of its options are documented in the app's README.
 
 ## There is also a native app
 
