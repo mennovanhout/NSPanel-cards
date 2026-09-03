@@ -24,6 +24,10 @@ the constraint.
 <sub>Rendered from `dist/nspanel-cards.js` at the panel's own 480×480, by
 [`dev/bench.html`](dev/bench.html) — not mockups.</sub>
 
+**New here?** The step-by-step, from an empty Home Assistant to a working panel and on to
+the next one, is the [tutorial in the app repo](https://github.com/mennovanhout/nspanelpro-flutter/blob/main/TUTORIAL.md).
+It starts with installing these cards.
+
 ## Cards
 
 **Controls** — drag to set, tap to act, long-press for the full-screen surface:
