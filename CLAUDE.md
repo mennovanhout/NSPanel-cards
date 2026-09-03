@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-A HACS-installable Lovelace plugin: eleven custom cards (plus one config-only element) for
+A HACS-installable Lovelace plugin: twelve custom cards (plus one config-only element) for
 the **Sonoff NSPanel Pro 86** (square 480×480 wall panel, Rockchip PX30 / 2 GB / Mali-G31,
 Android 8.1). Distributed as a single JavaScript file that Home Assistant loads as a module
 resource. The same card configs are rendered natively by the sibling Flutter app.
@@ -18,7 +18,8 @@ Cards, in two families:
   `nspanel-status-card`, `nspanel-weather-card`, `nspanel-clock-card`. Read-only, often several
   entities, tap opens more-info.
 - **Actions** (`NsInfoCard` too, since it needs the multi-entity diff and the timers but no
-  drag): `nspanel-button-card`. Scenes, scripts, automations.
+  drag): `nspanel-button-card`. Scenes, scripts, automations. And `nspanel-alarm-card`:
+  arm/disarm with a keypad (`ns-keypad`) when the entity has a `code_format`.
 - `nspanel-probe-card` is neither — a standalone diagnostics element.
 
 ## Repo layout

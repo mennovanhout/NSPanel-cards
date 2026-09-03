@@ -56,6 +56,11 @@
     'script.good_morning': st('script.good_morning', 'off', { friendly_name: 'Good morning' }),
     'script.leaving': st('script.leaving', 'off', { friendly_name: 'Leaving' }),
     'scene.movie': st('scene.movie', 'unknown', { friendly_name: 'Movie' }),
+    // arms without a code, disarms with 1234 and refuses anything else
+    'alarm_control_panel.home': st('alarm_control_panel.home', 'disarmed', {
+      friendly_name: 'Home Alarm', code_format: 'number', code_arm_required: false,
+      supported_features: 7, changed_by: null,
+    }),
   };
 
   /* What a service call does to the mock house. Only enough to make the
@@ -96,6 +101,16 @@
       s.state = now();
     } else if (domain === 'homeassistant' && service === 'toggle') {
       s.state = s.state === 'on' ? 'off' : 'on';
+    } else if (domain === 'alarm_control_panel') {
+      if (service === 'alarm_disarm') {
+        if (data.code !== '1234') return { error: { code: 'invalid_code', message: 'Invalid alarm code provided' } };
+        s.state = 'disarmed';
+      } else {
+        const to = service.replace('alarm_arm_', 'armed_');
+        s.state = 'arming';
+        setTimeout(() => { s.state = to; push(id); }, 1500);
+      }
+      a.changed_by = 'panel';
     }
     s.last_updated = now();
     return id;
@@ -168,6 +183,10 @@
         window.__mockCalls = (window.__mockCalls || []).concat(
           msg.domain + '.' + msg.service + ' ' + JSON.stringify(msg.service_data || {}));
         setTimeout(() => {
+          if (touched && touched.error) {
+            this._recv({ id: msg.id, type: 'result', success: false, error: touched.error });
+            return;
+          }
           this._recv({ id: msg.id, type: 'result', success: true, result: null });
           if (touched) push(touched);
         }, 25);

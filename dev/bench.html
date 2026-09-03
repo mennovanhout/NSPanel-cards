@@ -73,6 +73,10 @@
     <div class="cap">Buttons</div>
   </div>
   <div>
+    <div class="panel" id="p-alarm"><div class="stack" id="s-alarm"></div></div>
+    <div class="cap">alarm - disarmed with three modes, and armed away</div>
+  </div>
+  <div>
     <div class="panel" id="p-status"><div class="stack" id="s-status"></div></div>
     <div class="cap">Status</div>
   </div>
@@ -188,6 +192,13 @@ const hass = {
           '</linearGradient></defs><rect width="160" height="160" fill="url(#g)"/>' +
           '<circle cx="112" cy="48" r="26" fill="rgba(255,255,255,.35)"/></svg>'),
         supported_features: 1 | 4 | 16 | 32 | 4096 | 16384 }),
+
+    'alarm_control_panel.home': st('alarm_control_panel.home', 'disarmed',
+      { friendly_name: 'Home Alarm', code_format: 'number', code_arm_required: false,
+        supported_features: 7 }),
+    'alarm_control_panel.armed': st('alarm_control_panel.armed', 'armed_away',
+      { friendly_name: 'Home Alarm', code_format: 'number', supported_features: 7,
+        changed_by: 'Menno' }),
 
     'script.goodnight': st('script.goodnight', 'off', { friendly_name: 'Goodnight' }),
     'script.good_morning': st('script.good_morning', 'off',
@@ -328,6 +339,15 @@ card('nspanel-button-card', {
     { entity: 'script.leaving', name: 'Leaving', icon: 'mdi:lock' },
   ],
 }, document.getElementById('s-scenes'));
+
+card('nspanel-alarm-card', {
+  entity: 'alarm_control_panel.home', title: 'Alarm', height: 200,
+  modes: ['home', 'away', 'night'],
+}, document.getElementById('s-alarm'));
+
+card('nspanel-alarm-card', {
+  entity: 'alarm_control_panel.armed', title: 'Alarm', height: 200,
+}, document.getElementById('s-alarm'));
 
 card('nspanel-status-card', {
   title: 'House', height: 444,

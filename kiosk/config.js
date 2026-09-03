@@ -100,5 +100,21 @@ window.NSPANEL_CONFIG = {
         },
       ],
     },
+    {
+      cards: [
+        {
+          type: 'nspanel-alarm-card',
+          entity: 'alarm_control_panel.home',
+          title: 'Alarm',
+          modes: ['home', 'away', 'night'],
+          height: 200,
+        },
+        {
+          type: 'nspanel-clock-card',
+          height: 244,
+          show_date: true,
+        },
+      ],
+    },
   ],
 };

@@ -44,6 +44,7 @@ It starts with installing these cards.
 | Card | What it does |
 | --- | --- |
 | `custom:nspanel-button-card` | Scenes, scripts, automations. One big button, or up to six in a 1–3 column grid. Tells you the tap landed, and can ask twice before doing something drastic. |
+| `custom:nspanel-alarm-card` | Arm and disarm an alarm. A button per mode, one Disarm when it is set, and a full-screen keypad when the alarm wants a code. |
 
 **Information** — read-only, tap opens Home Assistant's own more-info dialog:
 
@@ -100,7 +101,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.7.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.8.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -368,6 +369,47 @@ the scene did not do what you expected.
 | `more_info` | `true` | long-press opens the dialog |
 
 Per button: `entity`, `name`, `icon`, `service`, `data`, `confirm`, `confirm_text`.
+
+### Alarm
+
+<table>
+<tr>
+<td valign="top">
+
+```yaml
+type: custom:nspanel-alarm-card
+entity: alarm_control_panel.home
+title: Alarm
+modes: [home, away, night]
+height: 200
+```
+
+</td>
+<td><img src="docs/images/alarm.png" alt="Two alarm cards: one disarmed with Home, Away and Night buttons in green; one armed away in red, changed by Menno, with a single Disarm button" width="300"></td>
+</tr>
+</table>
+
+Disarmed, the card offers one button per mode. Armed, arming, pending or triggered, it offers
+one thing: **Disarm**. The state line does the talking — green at rest, red when set, amber
+while it is counting, and the whole card tints when it has gone off, once, without pulsing.
+`changed_by` shows underneath when the alarm reports it.
+
+When the alarm wants a code (`code_format` is set: always to disarm, and to arm unless
+`code_arm_required` is false) the button opens a full-screen keypad: masked dots, 3×4 keys,
+one confirm button named after the action. A refused code — Home Assistant rejects the
+service call — says "Wrong code", clears, and leaves the keypad open. A text-format code
+gets a text field instead.
+
+A mode listed in `modes` that the alarm does not support (by `supported_features`) is
+hidden rather than drawn dead.
+
+| Option | Default | |
+| --- | --- | --- |
+| `modes` | `[home, away]` | which arm buttons, in order: `home`, `away`, `night`, `vacation`, `custom_bypass` |
+| `icon` | `mdi:shield-off-outline` | the icon while disarmed; the armed and alarm states keep their own |
+| `sounds` | `true` | the native app rings its built-in armed / disarmed / alarm sounds on state changes; this bundle ignores it |
+| `haptics` | `true` | native app only |
+| `more_info` | `true` | a tap on the state opens the dialog |
 
 ### Sensor
 

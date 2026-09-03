@@ -41,7 +41,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.7.0';
+const NSPANEL_VERSION = '0.8.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2077,6 +2077,397 @@ class NsPanelButtonCard extends NsInfoCard {
 }
 
 /* ================================================================== *
+ * Alarm card - arm and disarm, with the keypad when HA wants a code
+ *
+ * Disarmed shows a button per mode; anything else shows Disarm. The state
+ * line is the whole point: red when armed, amber while it is thinking,
+ * the card itself tinted when it has gone off.
+ * ================================================================== */
+
+/* key, label, service, supported_features bit, icon */
+const ALARM_MODES = [
+  ['home', 'Home', 'alarm_arm_home', 1, 'mdi:shield-home'],
+  ['away', 'Away', 'alarm_arm_away', 2, 'mdi:shield-lock'],
+  ['night', 'Night', 'alarm_arm_night', 4, 'mdi:shield-moon'],
+  ['custom_bypass', 'Bypass', 'alarm_arm_custom_bypass', 16, 'mdi:shield-half-full'],
+  ['vacation', 'Vacation', 'alarm_arm_vacation', 32, 'mdi:shield-airplane'],
+];
+
+/* label, colour (null = the card's accent), icon */
+const ALARM_LOOK = {
+  disarmed: ['Disarmed', null, 'mdi:shield-off-outline'],
+  armed_home: ['Armed home', '#f87171', 'mdi:shield-home'],
+  armed_away: ['Armed away', '#f87171', 'mdi:shield-lock'],
+  armed_night: ['Armed night', '#f87171', 'mdi:shield-moon'],
+  armed_vacation: ['Armed vacation', '#f87171', 'mdi:shield-airplane'],
+  armed_custom_bypass: ['Armed (bypass)', '#f87171', 'mdi:shield-half-full'],
+  arming: ['Arming\u2026', '#ffb74a', 'mdi:shield-sync'],
+  pending: ['Pending\u2026', '#ffb74a', 'mdi:shield-alert'],
+  triggered: ['TRIGGERED', '#f87171', 'mdi:bell-ring'],
+};
+
+const ALARM_CSS = `
+.al { display: flex; flex-direction: column; height: 100%; gap: 10px; pointer-events: auto; }
+.al .head { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; gap: 14px; cursor: pointer; }
+.al .head ha-icon { --mdc-icon-size: 46px; color: var(--al-color); flex: none; }
+.al .who { flex: 1; min-width: 0; }
+.al .st {
+  font-size: 24px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em;
+  color: var(--al-color);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.al .sub {
+  font-size: 14px; font-weight: 500; color: var(--ns-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.al .arow { display: flex; gap: 10px; height: 60px; flex: none; }
+.al .ab {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 0 12px; border: 0; border-radius: 16px;
+  background: var(--ns-surface-2); color: var(--ns-text);
+  font-family: inherit; font-size: 17px; font-weight: 600;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: transform .1s ease-out;
+}
+.al .ab:active { transform: scale(.96); }
+.al .ab ha-icon { --mdc-icon-size: 24px; color: var(--ns-accent); flex: none; }
+.al .ab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al .arow[data-n="3"] .ab, .al .arow[data-n="4"] .ab, .al .arow[data-n="5"] .ab
+  { font-size: 15px; gap: 6px; padding: 0 6px; }
+.al .arow[data-n="3"] .ab ha-icon, .al .arow[data-n="4"] .ab ha-icon, .al .arow[data-n="5"] .ab ha-icon
+  { --mdc-icon-size: 20px; }
+/* gone off: the whole card says so, once, without pulsing */
+.card.info.triggered { background: rgba(248,113,113,.22); }
+.card.info.triggered .ab ha-icon { color: var(--ns-text); }
+`;
+
+class NsPanelAlarmCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-alarm-card'; }
+  static get extraCss() { return ALARM_CSS; }
+  static get accent() { return '#8ddba4'; }
+  static get defaultOptions() {
+    return { modes: ['home', 'away'], sounds: true, haptics: true, more_info: true };
+  }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('alarm_control_panel.') === 0)
+      : null;
+    return { entity: found || 'alarm_control_panel.home', height: 200 };
+  }
+
+  _teardown() {
+    (this._timers || []).forEach((t) => clearTimeout(t));
+    this._timers = [];
+  }
+
+  _later(fn, ms) {
+    this._timers = this._timers || [];
+    const t = setTimeout(fn, ms);
+    this._timers.push(t);
+    return t;
+  }
+
+  /* The config's list, in its order, minus what the entity says it cannot
+     do. No supported_features at all: take the config's word for it. */
+  _modes() {
+    const s = this._stateObj;
+    const a = (s && s.attributes) || {};
+    const sup = typeof a.supported_features === 'number' ? a.supported_features : null;
+    const cfg = this._config.modes;
+    const wanted = Array.isArray(cfg) && cfg.length ? cfg : ['home', 'away'];
+    return wanted
+      .map((k) => ALARM_MODES.find((m) => m[0] === String(k)))
+      .filter((m) => m && (sup === null || (sup & m[3]) !== 0));
+  }
+
+  /* Never without a code_format; always to disarm; to arm only when
+     code_arm_required, which defaults to true. */
+  _needsCode(arming) {
+    const a = (this._stateObj && this._stateObj.attributes) || {};
+    if (!a.code_format) return false;
+    if (!arming) return true;
+    return a.code_arm_required === undefined ? true : !!a.code_arm_required;
+  }
+
+  _act(service, label, arming) {
+    if (this._config.haptics) haptic(this, 'light');
+    if (!this._needsCode(arming)) { this._send(service, null); return; }
+    const a = (this._stateObj && this._stateObj.attributes) || {};
+    keypad().open({
+      title: label,
+      accent: this._accent(),
+      text: a.code_format === 'text',
+      onSubmit: (code) => this._send(service, code),
+    });
+  }
+
+  /* Resolves to whether HA accepted it. hass.callService rejects on a
+     refused code; a mock that returns nothing counts as accepted. */
+  _send(service, code) {
+    if (!this._hass) return Promise.resolve(false);
+    const data = { entity_id: this._config.entity };
+    if (code !== null && code !== undefined) data.code = code;
+    let p;
+    try { p = this._hass.callService('alarm_control_panel', service, data); }
+    catch (e) { return Promise.resolve(false); }
+    const accepted = () => {
+      // optimistic, until the state moves or twice echo_ms has passed
+      this._pendingLabel = service === 'alarm_disarm' ? 'Disarming\u2026' : 'Arming\u2026';
+      this._scheduleRender();
+      this._later(() => { this._pendingLabel = null; this._scheduleRender(); },
+        2 * (this._config.echo_ms || 1500));
+      return true;
+    };
+    if (!p || typeof p.then !== 'function') return Promise.resolve(accepted());
+    return p.then(accepted, () => false);
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="content"><div class="al">
+          <div class="head">
+            <ha-icon></ha-icon>
+            <div class="who"><div class="st"></div><div class="sub"></div></div>
+          </div>
+          <div class="arow"></div>
+        </div></div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._icon = this.shadowRoot.querySelector('.head ha-icon');
+    this._st = this.shadowRoot.querySelector('.st');
+    this._sub = this.shadowRoot.querySelector('.sub');
+    this._row = this.shadowRoot.querySelector('.arow');
+    this._rowKey = null;
+    this._lastState = null;
+    this._bindMoreInfo(this.shadowRoot.querySelector('.head'));
+  }
+
+  /* The button row is rebuilt only when what it should hold changes -
+     disarmed vs not, and which modes - so a state tick never touches it. */
+  _buttons(disarmed, modes, broken) {
+    const key = broken ? 'none' : (disarmed ? 'arm:' + modes.map((m) => m[0]).join(',') : 'disarm');
+    if (key === this._rowKey) return;
+    this._rowKey = key;
+    this._row.innerHTML = '';
+    if (broken) { this._row.removeAttribute('data-n'); return; }
+    const items = disarmed
+      ? modes.map((m) => ({ icon: m[4], label: m[1], service: m[2], arming: true,
+        title: 'Arm ' + m[1].toLowerCase() }))
+      : [{ icon: 'mdi:shield-off-outline', label: 'Disarm', service: 'alarm_disarm',
+        arming: false, title: 'Disarm' }];
+    this._row.setAttribute('data-n', String(items.length));
+    items.forEach((it) => {
+      const b = document.createElement('button');
+      b.className = 'ab';
+      b.innerHTML = `<ha-icon icon="${it.icon}"></ha-icon><span>${it.label}</span>`;
+      b.addEventListener('click', () => this._act(it.service, it.title, it.arming));
+      this._row.appendChild(b);
+    });
+  }
+
+  _render() {
+    if (!this._card) return;
+    const s = this._stateObj;
+    const broken = !s || s.state === 'unavailable' || s.state === 'unknown';
+    const look = (!broken && ALARM_LOOK[s.state]) || ['Unavailable', '#98a1b0', 'mdi:alert-circle-outline'];
+    const color = look[1] || this._accent();
+    if (s && s.state !== this._lastState) { this._lastState = s.state; this._pendingLabel = null; }
+
+    this._card.style.setProperty('--al-color', color);
+    this._card.classList.toggle('triggered', !broken && s.state === 'triggered');
+    this._card.classList.toggle('broken', broken);
+    // `icon` is the resting (disarmed) icon; the armed and alarm states keep their own
+    this._icon.setAttribute('icon', (!broken && s.state === 'disarmed' && this._config.icon) || look[2]);
+    this._st.textContent = this._pendingLabel || look[0];
+    const by = s && s.attributes && s.attributes.changed_by;
+    this._sub.textContent = this._title() + (by ? ' \u00b7 by ' + by : '');
+    this._buttons(!broken && s.state === 'disarmed', this._modes(), broken);
+  }
+}
+
+/* ---- the keypad: masked dots, 3x4 keys, one confirm ---- */
+
+const KEYPAD_CSS = `
+:host {
+  position: fixed; inset: 0; z-index: 10000; overflow: hidden; display: block;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #f2f4f7; --ns-accent: #8ddba4;
+}
+* { box-sizing: border-box; }
+.scrim { position: absolute; inset: 0; background: #0b0d10; opacity: 0; transition: opacity .16s linear; }
+.scrim.in { opacity: .92; }
+.wrap {
+  position: absolute; inset: 0; display: flex; flex-direction: column; padding: 16px; gap: 12px;
+  opacity: 0; transform: translate3d(0, 12px, 0);
+  transition: opacity .18s linear, transform .18s cubic-bezier(.22,.61,.36,1);
+}
+.wrap.in { opacity: 1; transform: none; }
+.head { display: flex; align-items: center; gap: 12px; flex: none; }
+.title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.hint { font-size: 15px; color: #98a1b0; font-weight: 500; }
+.hint.wrong { color: #f87171; }
+.x {
+  width: 56px; height: 56px; flex: none; border: 0; border-radius: 16px;
+  background: rgba(255,255,255,.10); color: #fff; font-size: 24px; line-height: 1;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.dots { height: 28px; display: flex; justify-content: center; align-items: center; gap: 12px; flex: none; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,.18); }
+.dot.on { background: var(--ns-accent); }
+.dots.wrong .dot.on { background: #f87171; }
+.keys { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 10px; min-height: 0; }
+.k {
+  border: 0; border-radius: 16px; background: rgba(255,255,255,.10); color: #f2f4f7;
+  font-family: inherit; font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.k.m { background: rgba(255,255,255,.06); color: #98a1b0; }
+.k:active { transform: scale(.96); }
+input.t {
+  display: none; width: 100%; height: 56px; border: 0; border-radius: 14px; padding: 0 16px;
+  background: rgba(255,255,255,.08); color: #f2f4f7; font-size: 22px; letter-spacing: 4px; outline: none;
+}
+.text input.t { display: block; }
+.text .dots, .text .keys { display: none; }
+.ok {
+  height: 58px; flex: none; border: 0; border-radius: 16px;
+  background: var(--ns-accent); color: #0b0d10; font-family: inherit; font-size: 18px; font-weight: 700;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.ok[disabled] { opacity: .35; }
+`;
+
+class NsKeypad extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this.shadowRoot.innerHTML = `
+      <style>${KEYPAD_CSS}</style>
+      <div class="scrim"></div>
+      <div class="wrap">
+        <div class="head">
+          <div style="flex:1;min-width:0"><div class="title"></div><div class="hint"></div></div>
+          <button class="x" aria-label="Close">&#10005;</button>
+        </div>
+        <input class="t" type="password" inputmode="text" autocomplete="off">
+        <div class="dots"></div>
+        <div class="keys"></div>
+        <button class="ok"></button>
+      </div>
+    `;
+    const q = (sel) => this.shadowRoot.querySelector(sel);
+    this._scrim = q('.scrim'); this._wrap = q('.wrap'); this._title = q('.title');
+    this._hint = q('.hint'); this._dots = q('.dots'); this._keys = q('.keys');
+    this._ok = q('.ok'); this._input = q('.t');
+    this._code = '';
+    this._busy = false;
+    q('.x').addEventListener('click', () => this.close());
+    this._scrim.addEventListener('click', () => this.close());
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '<'].forEach((k) => {
+      const b = document.createElement('button');
+      b.className = 'k' + (k === 'C' || k === '<' ? ' m' : '');
+      b.textContent = k === '<' ? '\u232b' : k;
+      b.addEventListener('click', () => this._tap(k));
+      this._keys.appendChild(b);
+    });
+    this._input.addEventListener('input', () => this._draw());
+    this._input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submit(); });
+    this._ok.addEventListener('click', () => this._submit());
+  }
+
+  /* opts: {title, hint, accent, text, onSubmit(code) -> Promise<bool>} */
+  open(opts) {
+    this._opts = Object.assign({ hint: 'Enter the code', accent: '#8ddba4', text: false }, opts);
+    this.style.setProperty('--ns-accent', this._opts.accent);
+    this._title.textContent = this._opts.title || '';
+    this._ok.textContent = this._opts.title || 'OK';
+    this._wrap.classList.toggle('text', !!this._opts.text);
+    this._code = '';
+    this._input.value = '';
+    this._busy = false;
+    this._setHint(false);
+    this._draw();
+    const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
+    if (this.parentNode !== host) {
+      this.style.position = host === document.body ? 'fixed' : 'absolute';
+      host.appendChild(this);
+    }
+    requestAnimationFrame(() => {
+      this._scrim.classList.add('in');
+      this._wrap.classList.add('in');
+      if (this._opts.text) this._input.focus();
+    });
+  }
+
+  close() {
+    this._scrim.classList.remove('in');
+    this._wrap.classList.remove('in');
+    setTimeout(() => { if (this.parentNode) this.parentNode.removeChild(this); }, 200);
+  }
+
+  get _entered() { return this._opts && this._opts.text ? this._input.value : this._code; }
+
+  _setHint(wrong) {
+    this._hint.textContent = wrong ? 'Wrong code' : this._opts.hint;
+    this._hint.classList.toggle('wrong', wrong);
+    this._dots.classList.toggle('wrong', wrong);
+  }
+
+  _tap(k) {
+    haptic(this, 'light');
+    this._setHint(false);
+    if (k === 'C') this._code = '';
+    else if (k === '<') this._code = this._code.slice(0, -1);
+    else if (this._code.length < 12) this._code += k;
+    this._draw();
+  }
+
+  _draw() {
+    const n = Math.max(4, this._code.length);
+    while (this._dots.children.length < n) {
+      const d = document.createElement('div'); d.className = 'dot'; this._dots.appendChild(d);
+    }
+    while (this._dots.children.length > n) this._dots.removeChild(this._dots.lastChild);
+    Array.prototype.forEach.call(this._dots.children, (d, i) => d.classList.toggle('on', i < this._code.length));
+    const ready = this._entered.length > 0 && !this._busy;
+    if (ready) this._ok.removeAttribute('disabled'); else this._ok.setAttribute('disabled', '');
+  }
+
+  _submit() {
+    const code = this._entered;
+    if (!code || this._busy) return;
+    haptic(this, 'medium');
+    this._busy = true;
+    this._ok.textContent = '\u2026';
+    this._draw();
+    Promise.resolve(this._opts.onSubmit(code)).then((ok) => {
+      this._busy = false;
+      this._ok.textContent = this._opts.title || 'OK';
+      if (ok) { this.close(); return; }
+      this._code = '';
+      this._input.value = '';
+      this._setHint(true);
+      this._draw();
+      setTimeout(() => { if (this.parentNode) this._setHint(false); }, 2000);
+    });
+  }
+}
+customElements.define('ns-keypad', NsKeypad);
+
+let _keypad = null;
+function keypad() {
+  if (!_keypad) _keypad = document.createElement('ns-keypad');
+  return _keypad;
+}
+
+/* ================================================================== *
  * Status card - is the house alright?
  *
  * Quiet when everything is normal, loud when it is not. With only_problems
@@ -3233,6 +3624,8 @@ const EDITOR_LABELS = {
   confirm: 'Ask for a second tap',
   confirm_text: 'Text while waiting for it',
   feedback_ms: 'Hold the tick for (ms)',
+  modes: 'Arm buttons',
+  sounds: 'Sounds on the panel app',
   haptics: 'Haptics',
 };
 
@@ -3494,6 +3887,32 @@ const BUTTON_SCHEMA = [
   { name: 'confirm_text', selector: { text: {} } },
 ];
 
+const ALARM_SCHEMA = [
+  { name: 'title', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'icon', selector: { icon: {} } },
+      { name: 'height', selector: { number: { min: 60, max: 480, step: 2, mode: 'box' } } },
+    ],
+  },
+  { name: 'accent', selector: { text: {} } },
+  {
+    name: 'modes', selector: {
+      select: {
+        multiple: true, mode: 'list',
+        options: ALARM_MODES.map((m) => ({ value: m[0], label: m[1] })),
+      },
+    },
+  },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'sounds', selector: { boolean: {} } },
+      { name: 'haptics', selector: { boolean: {} } },
+      { name: 'more_info', selector: { boolean: {} } },
+    ],
+  },
+];
+
 const LIST_NOTE = 'Entities are a list, which this form cannot draw. Edit them in ' +
   'YAML - the GUI leaves them alone.';
 
@@ -3520,6 +3939,16 @@ class NsPanelButtonCardEditor extends NsBaseCardEditor {
   static get note() {
     return 'One entity here is the single-button shorthand. For several buttons use ' +
       'a `buttons:` list in YAML - the GUI leaves it alone.';
+  }
+}
+
+class NsPanelAlarmCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-alarm-card'; }
+  static get domain() { return 'alarm_control_panel'; }
+  static get rows() { return ALARM_SCHEMA; }
+  static get note() {
+    return 'A mode the alarm does not support is hidden even if ticked. Sounds and ' +
+      'haptics only do something in the native panel app.';
   }
 }
 
@@ -3595,6 +4024,7 @@ customElements.define('nspanel-probe-card', NsPanelProbeCard);
 customElements.define('nspanel-climate-card', NsPanelClimateCard);
 customElements.define('nspanel-media-card', NsPanelMediaCard);
 customElements.define('nspanel-button-card', NsPanelButtonCard);
+customElements.define('nspanel-alarm-card', NsPanelAlarmCard);
 customElements.define('nspanel-sensor-card', NsPanelSensorCard);
 customElements.define('nspanel-sensors-card', NsPanelSensorsCard);
 customElements.define('nspanel-status-card', NsPanelStatusCard);
@@ -3607,6 +4037,7 @@ customElements.define('nspanel-cover-card-editor', NsPanelCoverCardEditor);
 customElements.define('nspanel-climate-card-editor', NsPanelClimateCardEditor);
 customElements.define('nspanel-media-card-editor', NsPanelMediaCardEditor);
 customElements.define('nspanel-button-card-editor', NsPanelButtonCardEditor);
+customElements.define('nspanel-alarm-card-editor', NsPanelAlarmCardEditor);
 customElements.define('nspanel-sensor-card-editor', NsPanelSensorCardEditor);
 customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
 customElements.define('nspanel-status-card-editor', NsPanelStatusCardEditor);
@@ -3643,6 +4074,12 @@ window.customCards.push(
     type: 'nspanel-button-card',
     name: 'NSPanel Button',
     description: 'Scenes, scripts and automations. Big targets, and it tells you the tap landed.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-alarm-card',
+    name: 'NSPanel Alarm',
+    description: 'Arm and disarm, with a keypad when the alarm wants a code.',
     preview: true,
   },
   {

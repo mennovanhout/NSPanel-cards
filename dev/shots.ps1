@@ -14,7 +14,7 @@ $base   = "http://localhost:8177/dev/bench.html"
 
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-foreach ($shot in @("light", "cover", "sheet", "climate", "media", "info", "scenes", "status", "sky")) {
+foreach ($shot in @("light", "cover", "sheet", "climate", "media", "info", "scenes", "alarm", "status", "sky")) {
   $file = Join-Path $out "$shot.png"
   if (Test-Path $file) { Remove-Item $file }
   $chromeArgs = @(

@@ -162,7 +162,10 @@ class HaSocket {
   callService(domain, service, data) {
     return this.send({
       type: 'call_service', domain, service, service_data: data || {},
-    }).catch((e) => console.warn('call_service failed', domain + '.' + service, e.message));
+    }).catch((e) => {
+      console.warn('call_service failed', domain + '.' + service, e.message);
+      throw e; // the alarm card's keypad needs to know; the others fire and forget
+    });
   }
 }
 
