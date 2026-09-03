@@ -266,6 +266,12 @@ When a card gains an option here, the app needs the same option - its `lib/cards
 says which paths it tried when neither is there. That was the "unknown card type" report:
 only `kiosk/` had been copied to the panel.
 
+`custom:nspanel-screensaver` is the one card in this bundle that is not a card: it is the
+app's screensaver config, kept in the dashboard so it lives with everything else. Here it
+renders nothing (`display: none`, card size 0) and has no editor, so it is deliberately absent
+from `dev/editor.html`'s card list. Its options are documented in the app's README, not this
+one - the app owns them.
+
 ## HACS validation
 
 `.github/workflows/validate.yml` runs `hacs/action`. Three of its checks depend on things
