@@ -594,6 +594,59 @@ An information page for the same panel:
 
 300 + 144 + the 12px gap fills a 480px panel exactly, the same way 260 + 184 does.
 
+## Running it without the Home Assistant frontend
+
+These cards are careful with the panel's frame budget, but they are passengers. Open a
+dashboard in the companion app and the WebView is also running the whole HA frontend: Lit, the
+entity registry, the view tree, the theme system. On a PX30 that is most of the cost, and no
+amount of card tuning touches it.
+
+`kiosk/` is the experiment that isolates it — the same cards, a websocket to Home Assistant,
+and nothing else:
+
+```
+kiosk/index.html   the page
+kiosk/app.js       websocket, pager, setup screen
+kiosk/config.js    your pages and cards - yours to edit, never overwritten
+kiosk/icons.js     <ha-icon> for pages that are not HA
+```
+
+It works because the cards' entire dependency on Home Assistant is `hass.states` and
+`hass.callService` (plus `hass.connection.subscribeMessage`, for the weather forecast). That is
+a small enough surface to reimplement in a few hundred lines.
+
+**Install it:** copy `dist/` and `kiosk/` into `/config/www/nspanel/`, then open
+`http://<your-ha>:8123/local/nspanel/kiosk/index.html` **on the panel** — the whole point is to
+measure that WebView on that GPU, so a desktop browser will tell you nothing.
+
+First run asks for your Home Assistant URL and a long-lived access token (profile → Security
+→ bottom of the page). The token is kept in that panel's `localStorage`. **Do not put it in
+`config.js`**: `/local/` is served without authentication, so a token in a file there is
+readable by anything on your network. Triple-tap the top-left corner to get the setup screen
+back.
+
+### Pages
+
+`config.js` is a list of pages; each page is a vertical stack of cards, using the same configs
+as the rest of this README (the `custom:` prefix is optional, so Lovelace card YAML converts
+straight across). Swipe sideways to change page.
+
+The pager is a native scroll-snap container, not a gesture handler. It does not have to be:
+the cards already declare `touch-action: pan-x` and hand any horizontal-first drag straight
+back — the same cooperation that makes them work inside a swipe card — so the browser pans on
+the compositor and no script runs during a swipe at all.
+
+### Two query flags
+
+- `?stats=1` puts a frame counter in the corner. This page exists to answer "is it smooth", so
+  measure rather than squint.
+- `?mock=1` swaps in a fake Home Assistant (`dev/kiosk-mock.js`) that speaks the same websocket
+  protocol, so you can try the page, and develop against it, without a real instance. Service
+  calls mutate the fake house and echo back, so the round trip is real.
+
+This is **experimental**, and deliberately not what HACS installs. It renders only these cards,
+has no more-info dialog, and knows nothing about the rest of Home Assistant.
+
 ## Sizing for your panel
 
 The panel is 480 physical pixels, but Android density decides how many **CSS** pixels the page

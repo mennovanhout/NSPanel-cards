@@ -84,34 +84,12 @@
 
 <!-- the shipped bundle, loaded exactly as HA loads it -->
 <script src="../dist/nspanel-cards.js"></script>
-<script src="./mdi-icons.js"></script>
+<script src="../kiosk/icons.js"></script>
 
 <script>
-/* ------------------------------------------------------------------ *
- * ha-icon stub. Home Assistant supplies this element; outside HA the
- * cards would render an empty box. Path data comes from mdi-icons.js,
- * vendored so the bench and the screenshot script work offline.
- * ------------------------------------------------------------------ */
-class HaIcon extends HTMLElement {
-  static get observedAttributes() { return ['icon']; }
-  connectedCallback() { this._paint(); }
-  attributeChangedCallback() { this._paint(); }
-  _paint() {
-    const name = (this.getAttribute('icon') || '').replace('mdi:', '');
-    if (!name || name === this._shown) return;
-    this._shown = name;
-    const d = window.MDI_PATHS[name];
-    if (!d) { console.warn('bench: no vendored icon for', name); return; }
-    const size = getComputedStyle(this).getPropertyValue('--mdc-icon-size').trim() || '24px';
-    this.style.display = 'inline-flex';
-    this.style.width = size;
-    this.style.height = size;
-    this.innerHTML =
-      '<svg viewBox="0 0 24 24" style="width:100%;height:100%;fill:currentColor">' +
-      '<path d="' + d + '"></path></svg>';
-  }
-}
-customElements.define('ha-icon', HaIcon);
+/* <ha-icon> and its path data come from kiosk/icons.js - the same file the
+ * standalone panel page loads, so there is one icon table rather than two
+ * that drift apart. */
 
 /* ------------------------------------------------------------------ *
  * Mock hass. The cards only ever touch states + callService (and, for

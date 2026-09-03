@@ -31,12 +31,15 @@ dev/bench.html             preview bench: mock hass + an ha-icon stub, renders t
                            bundle in a 480x480 frame outside Home Assistant
 dev/editor.html            harness for the GUI editor: stubs ha-form, shows the emitted
                            config-changed payload, and runs the option sync check
-dev/mdi-icons.js           vendored MDI path data for the bench's ha-icon stub
+dev/kiosk-mock.js          fake HA websocket for kiosk/index.html?mock=1
 dev/serve.py               no-cache static server for both (plain http.server lets Chrome
                            cache the bundle and render the previous build)
 dev/shots.ps1              drives headless Chrome over the bench to regenerate the README
                            screenshots
 docs/images/               those screenshots; referenced from the README
+kiosk/                     the standalone panel page - same cards, a websocket to HA, and
+                           none of the HA frontend. index.html + app.js + icons.js, plus
+                           config.js which belongs to the user and is never rewritten
 ```
 
 ### Regenerating the screenshots
@@ -54,11 +57,15 @@ powershell -NoProfile -File dev/shots.ps1
 panel in the bench.
 Loading `dev/bench.html` with no query string gives the whole rack for eyeballing changes.
 
-HA's `ha-icon` does not exist outside HA, so the bench stubs it against `dev/mdi-icons.js`.
-**A card that starts using an icon not in that table renders an empty box in the bench and in
-the screenshots** (the stub logs a warning). Fetch the new path data from
-`https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/<name>.svg` and add it - do not write path
-data from memory, it will be wrong.
+HA's `ha-icon` does not exist outside HA. `kiosk/icons.js` defines it (only if nothing else
+has) and carries the MDI path data for every icon the cards pick themselves; the bench and the
+kiosk page both load that one file, so there is no second table to drift. Icons named in a
+user's config are fetched from the CDN on first use and cached in localStorage.
+
+**A card that starts choosing an icon not in that table draws an empty box on a panel with no
+internet**, so add it to `kiosk/icons.js` rather than relying on the fetch. Take the path data
+from `https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/<name>.svg` - do not write it from
+memory, it will be wrong.
 
 ## There is no build step
 
@@ -225,6 +232,28 @@ Tap toggles (on a moving cover, stops). Vertical drag adjusts relative to the cu
 over `drag_travel` px. Long-press (`long_press_ms`, 500 ms) opens the sheet. Horizontal drags
 are deliberately **released back to the page** on the first move when `swipe_safe` is on, so a
 wrapping swipe card still changes page — see `_onMove`.
+
+## The standalone panel page
+
+`kiosk/` is an experiment: is the panel slow because of the cards, or because of the HA
+frontend around them? It renders the same cards against a hand-rolled websocket client, so if
+it is smooth there and laggy in the companion app, the frontend was the cost.
+
+Three things in it are load-bearing:
+
+- **A new `hass` object per update.** `applyStates` rebuilds both the wrapper and the `states`
+  map. Each card's diff is `prev.states[id] === hass.states[id]`, so mutating in place would
+  make every card conclude nothing had changed and skip its render.
+- **The pager is CSS, not JavaScript.** A scroll-snap container, because the cards already
+  declare `touch-action: pan-x` and release horizontal-first drags. Do not "fix" this with a
+  pointer handler; it would fight the cards and move the pan off the compositor.
+- **The token lives in localStorage, never in a file.** `/local/` is unauthenticated.
+
+`?mock=1` loads `dev/kiosk-mock.js`, which replaces `window.WebSocket` with a fake HA speaking
+the real protocol - auth, get_states, subscribe_events, call_service, state_changed. That is
+what makes the connection path testable off the panel, which is the part you cannot debug
+standing in a hallway. `app.js` is a separate file from `index.html` precisely so the mock can
+be installed before it boots.
 
 ## HACS validation
 

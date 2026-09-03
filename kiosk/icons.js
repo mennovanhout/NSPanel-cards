@@ -1,12 +1,17 @@
-/* Material Design Icons path data (MDI 7.4.47, Apache-2.0), vendored for the
- * dev bench only - it is not part of the shipped bundle.
+/* <ha-icon> for pages that are not Home Assistant.
  *
- * Home Assistant supplies <ha-icon>; outside HA the cards would draw empty
- * boxes. The bench defines a stub that reads this table, so the bench and the
- * headless screenshot script both work offline. Add an entry here when a card
- * starts using an icon that is not yet listed.
+ * Inside HA the frontend supplies this element. kiosk/index.html and the dev
+ * bench are not inside HA, so without it every card draws an empty box. This
+ * file defines it only when nothing else has - loading it inside HA is a
+ * no-op, not a conflict.
  *
- * To fetch a new one:
+ * The table below is the Material Design Icons path data (MDI 7.4.47,
+ * Apache-2.0) for every icon the cards choose on their own. Icons you name
+ * yourself in a config are fetched from the CDN on first use and cached in
+ * localStorage, so a panel with internet renders anything; a panel without it
+ * renders the built-in set and leaves the rest blank.
+ *
+ * To add one by hand:
  *   https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/<name>.svg  -> the d="" of its <path>
  */
 window.MDI_PATHS = {
@@ -81,3 +86,72 @@ window.MDI_PATHS = {
   'sofa-outline': 'M21 9V7C21 5.35 19.65 4 18 4H14C13.23 4 12.53 4.3 12 4.78C11.47 4.3 10.77 4 10 4H6C4.35 4 3 5.35 3 7V9C1.35 9 0 10.35 0 12V17C0 18.65 1.35 20 3 20V22H5V20H19V22H21V20C22.65 20 24 18.65 24 17V12C24 10.35 22.65 9 21 9M14 6H18C18.55 6 19 6.45 19 7V9.78C18.39 10.33 18 11.12 18 12V14H13V7C13 6.45 13.45 6 14 6M5 7C5 6.45 5.45 6 6 6H10C10.55 6 11 6.45 11 7V14H6V12C6 11.12 5.61 10.33 5 9.78V7M22 17C22 17.55 21.55 18 21 18H3C2.45 18 2 17.55 2 17V12C2 11.45 2.45 11 3 11S4 11.45 4 12V16H20V12C20 11.45 20.45 11 21 11S22 11.45 22 12V17Z',
   'alert-circle-outline': 'M11,15H13V17H11V15M11,7H13V13H11V7M12,2C6.47,2 2,6.5 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20Z',
 };
+
+const MDI_CDN = 'https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/';
+const MDI_CACHE = 'nspanel-mdi';
+
+function cached() {
+  try { return JSON.parse(localStorage.getItem(MDI_CACHE) || '{}'); } catch (e) { return {}; }
+}
+function cache(name, d) {
+  try {
+    const all = cached();
+    all[name] = d;
+    localStorage.setItem(MDI_CACHE, JSON.stringify(all));
+  } catch (e) { /* full or private; the icon still draws this session */ }
+}
+
+const runtime = cached();
+const inflight = {};
+
+/* One fetch per unknown icon per panel, ever - the result is cached. A panel
+   with no internet simply keeps the blank box it would have had anyway. */
+function fetchPath(name) {
+  if (inflight[name]) return inflight[name];
+  inflight[name] = fetch(MDI_CDN + name + '.svg')
+    .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+    .then((svg) => {
+      const m = svg.match(/ d="([^"]+)"/);
+      if (!m) throw new Error('no path');
+      runtime[name] = m[1];
+      cache(name, m[1]);
+      return m[1];
+    })
+    .catch(() => null);
+  return inflight[name];
+}
+
+function pathFor(name) {
+  return window.MDI_PATHS[name] || runtime[name] || null;
+}
+
+class HaIcon extends HTMLElement {
+  static get observedAttributes() { return ['icon']; }
+  connectedCallback() { this._paint(); }
+  attributeChangedCallback() { this._paint(); }
+
+  _paint() {
+    const name = (this.getAttribute('icon') || '').replace('mdi:', '');
+    if (!name || name === this._shown) return;
+    this._shown = name;
+    const d = pathFor(name);
+    if (d) { this._draw(d); return; }
+    fetchPath(name).then((got) => {
+      // the icon attribute may have changed again while that was in flight
+      if (got && this._shown === name) this._draw(got);
+      else if (!got) console.warn('nspanel: no icon for mdi:' + name);
+    });
+  }
+
+  _draw(d) {
+    const size = getComputedStyle(this).getPropertyValue('--mdc-icon-size').trim() || '24px';
+    this.style.display = 'inline-flex';
+    this.style.width = size;
+    this.style.height = size;
+    this.innerHTML =
+      '<svg viewBox="0 0 24 24" style="width:100%;height:100%;fill:currentColor">' +
+      '<path d="' + d + '"></path></svg>';
+  }
+}
+
+if (!customElements.get('ha-icon')) customElements.define('ha-icon', HaIcon);
