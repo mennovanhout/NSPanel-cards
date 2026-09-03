@@ -211,7 +211,8 @@ function buildCard(conf) {
   const type = String(conf.type || '').replace(/^custom:/, '');
   const el = document.createElement(type);
   if (!customElements.get(type)) {
-    return broken(`Unknown card type "${conf.type}"`);
+    return broken(`Unknown card type "${conf.type}". The bundle loaded, so this is ` +
+      'either a typo or a card from a newer version than the nspanel-cards.js beside it.');
   }
   try {
     el.setConfig(Object.assign({}, conf, { type }));
@@ -342,9 +343,47 @@ function startStats() {
 
 let socket = null;
 
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const tag = document.createElement('script');
+    tag.src = src;
+    tag.onload = resolve;
+    tag.onerror = () => reject(new Error(src));
+    document.head.appendChild(tag);
+  });
+}
+
+/* Two layouts have to work, because both are the obvious thing to do: the
+   repo's own (kiosk/ beside dist/) and everything-in-one-folder, which is what
+   most people end up with after copying files onto a panel. index.html asks for
+   ../dist/ first; if that 404s we try alongside. */
+function findFile(name, dirs, tried) {
+  return dirs.reduce(
+    (chain, dir) => chain.catch(() => {
+      tried.push(new URL(dir + name, location.href).pathname);
+      return loadScript(dir + name);
+    }),
+    Promise.reject()
+  );
+}
+
+function ensureCards() {
+  if (window.NsPanelCards) return Promise.resolve();
+  const tried = [];
+  return findFile('nspanel-cards.js', ['../dist/', './'], tried).then(() => {
+    if (!window.NsPanelCards) throw new Error('loaded but defined nothing');
+  }).catch(() => {
+    throw new Error(
+      'nspanel-cards.js was not found. Tried:\n' + tried.join('\n') +
+      '\n\nCopy dist/nspanel-cards.js next to this page, or keep the repo layout ' +
+      '(dist/ beside kiosk/).');
+  });
+}
+
 function boot() {
   if (!window.NSPANEL_CONFIG) {
-    document.body.appendChild(broken('kiosk/config.js is missing or did not parse.'));
+    document.body.appendChild(broken(
+      'config.js is missing or did not parse. It should sit next to index.html.'));
     return;
   }
   buildPages();
@@ -358,19 +397,23 @@ function boot() {
 }
 
 /* ?mock=1 swaps in a fake Home Assistant that speaks the same websocket
-   protocol, so this page can be developed and demonstrated without a real
-   instance. The file lives in dev/ and never needs copying to the panel. */
-if (/[?&]mock=1/.test(location.search)) {
-  const tag = document.createElement('script');
-  tag.src = '../dev/kiosk-mock.js';
-  tag.onload = boot;
-  tag.onerror = () => {
-    document.body.appendChild(broken('?mock=1 needs dev/kiosk-mock.js next to kiosk/.'));
-  };
-  document.head.appendChild(tag);
-} else {
-  boot();
+   protocol, so this page can be demonstrated and developed without a real
+   instance. It lives in dev/ and does not have to be copied to the panel. */
+function start() {
+  if (!/[?&]mock=1/.test(location.search)) { boot(); return; }
+  const tried = [];
+  findFile('kiosk-mock.js', ['../dev/', './'], tried)
+    .then(boot)
+    .catch(() => {
+      document.body.appendChild(broken(
+        '?mock=1 needs kiosk-mock.js. Tried:\n' + tried.join('\n')));
+      boot();
+    });
 }
+
+ensureCards().then(start).catch((e) => {
+  document.body.appendChild(broken(e.message));
+});
 
 /* There is no more-info dialog outside Lovelace; swallow the request rather
    than letting it bubble into nothing and look like a dead tap. */

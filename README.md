@@ -594,6 +594,13 @@ An information page for the same panel:
 
 300 + 144 + the 12px gap fills a 480px panel exactly, the same way 260 + 184 does.
 
+## There is also a native app
+
+If the panel is still laggy with the frontend out of the way, the WebView itself is the
+ceiling. [nspanel-app](../nspanel-app) is a Flutter app that renders these same cards
+natively - it reads your Lovelace dashboard over the websocket, so the YAML in this README is
+the one config for both. Measured on the panel, it is not close.
+
 ## Running it without the Home Assistant frontend
 
 These cards are careful with the panel's frame budget, but they are passengers. Open a

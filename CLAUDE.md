@@ -255,6 +255,17 @@ what makes the connection path testable off the panel, which is the part you can
 standing in a hallway. `app.js` is a separate file from `index.html` precisely so the mock can
 be installed before it boots.
 
+## The Flutter app is a sibling, not a subfolder
+
+`../nspanel-app` renders the same cards natively and reads the same Lovelace config. It is a
+separate git repo on purpose: this one stays a single-file HACS plugin with no toolchain.
+When a card gains an option here, the app needs the same option - its `lib/cards/` mirrors
+`dist/` card for card, and its README says so.
+
+`kiosk/app.js` now looks for `nspanel-cards.js` beside itself as well as in `../dist/`, and
+says which paths it tried when neither is there. That was the "unknown card type" report:
+only `kiosk/` had been copied to the panel.
+
 ## HACS validation
 
 `.github/workflows/validate.yml` runs `hacs/action`. Three of its checks depend on things
