@@ -108,14 +108,14 @@ the old file and wondering why nothing changed.
 
 ## Configuration
 
-Both the light and cover cards have a **visual editor** — add one from the dashboard's card
-picker, or click the pencil on an existing card, and you get HA's own controls: entity picker,
-icon picker, switches, the lot. Everything in the shared options table below is in there.
+Every card has a **visual editor** — add one from the dashboard's card picker, or click the
+pencil on an existing card, and you get HA's own controls: entity picker, icon picker,
+switches, the lot. Every option in the tables below is in there.
 
-`presets` is the one exception. It is a list of objects and HA's form builder has no control
-for that, so presets stay in YAML — the editor leaves the key untouched, so opening the GUI on
-a card with hand-written presets will not eat them. (The probe card has no options and no
-editor.)
+The lists are the exception: `presets`, `entities`, `buttons` and `severity` are lists of
+objects, and HA's form builder has no control for those, so they stay in YAML — the editor
+leaves them untouched, so opening the GUI on a card with hand-written presets will not eat
+them. (The probe card and the screensaver card have no editor.)
 
 ### Light
 
@@ -534,7 +534,7 @@ every minute; the panel can take it, but it is one more thing running.
 | `long_press_ms` | `500` | |
 | `step` | `5` | the ± buttons in the full-screen control |
 | `haptics` | `true` | fires HA's `haptic` event |
-| `more_info` | `true` | tap opens HA's more-info dialog (information cards, and the climate card) |
+| `more_info` | `true` | open HA's more-info dialog: on tap for the information and climate cards, on long-press for buttons; the media card defaults it to `false` because its tap is play/pause |
 
 The drag, preset and long-press options apply to the control cards. The information cards take
 `entity`/`entities`, `title`, `icon`, `height`, `accent` and `more_info`, plus whatever is
@@ -573,7 +573,14 @@ views:
                 title: Bedroom blackout
                 height: 184
                 show_presets: false
+              # not a card: the native app's screensaver, kept with the rest
+              - type: custom:nspanel-screensaver
+                after: 300
+                image_url: https://example.com/random-photo
 ```
+
+`kiosk_mode` needs the [kiosk-mode](https://github.com/NemesisRE/kiosk-mode) HACS plugin and
+only matters in a browser; the app has no header to hide.
 
 An information page for the same panel:
 
@@ -600,18 +607,24 @@ An information page for the same panel:
 
 ## `custom:nspanel-screensaver`
 
-Not a card: a place in the dashboard to configure the [native app](../nspanel-app)'s
-screensaver - the photo, the wandering clock, the proximity wake. In a browser it renders
-nothing at all; it is in this bundle so Lovelace does not show "custom element doesn't exist"
-where it sits. Put it at the end of a vertical-stack rather than as its own page of a swipe
-card, or the browser gets a blank page. All of its options are documented in the app's README.
+Not a card: a place in the dashboard to configure the
+[native app](https://github.com/mennovanhout/nspanelpro-flutter)'s screensaver - the photo,
+the wandering clock, the proximity wake. In a browser it renders nothing at all; it is in this
+bundle so Lovelace does not show "custom element doesn't exist" where it sits. Put it at the
+end of a vertical-stack rather than as its own page of a swipe card, or the browser gets a
+blank page. All of its options are documented in the app's README.
 
-## There is also a native app
+## The native app
 
-If the panel is still laggy with the frontend out of the way, the WebView itself is the
-ceiling. [nspanel-app](../nspanel-app) is a Flutter app that renders these same cards
-natively - it reads your Lovelace dashboard over the websocket, so the YAML in this README is
-the one config for both. Measured on the panel, it is not close.
+On the panel itself, run these cards in
+[nspanelpro-flutter](https://github.com/mennovanhout/nspanelpro-flutter) rather than in a
+browser. It is a Flutter app that renders the same cards natively - it reads your Lovelace
+dashboard over the websocket, so the YAML in this README is the one config for both - and it
+makes the panel a Home Assistant device: proximity, illuminance, a screensaver, a speaker for
+announcements. The reason it exists is the panel's WebView: the frontend running inside it is
+most of the lag, and measured on the panel the app is not close. The
+[tutorial](https://github.com/mennovanhout/nspanelpro-flutter/blob/main/TUTORIAL.md) goes
+from these cards to a working panel.
 
 ## Running it without the Home Assistant frontend
 
@@ -641,8 +654,8 @@ measure that WebView on that GPU, so a desktop browser will tell you nothing.
 First run asks for your Home Assistant URL and a long-lived access token (profile → Security
 → bottom of the page). The token is kept in that panel's `localStorage`. **Do not put it in
 `config.js`**: `/local/` is served without authentication, so a token in a file there is
-readable by anything on your network. Triple-tap the top-left corner to get the setup screen
-back.
+readable by anything on your network. To get the setup screen back, hold two fingers still on
+the page for a second - a gesture no card uses.
 
 ### Pages
 

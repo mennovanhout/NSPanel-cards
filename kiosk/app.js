@@ -422,11 +422,23 @@ document.addEventListener('hass-more-info', (e) => {
   if (STATS) console.log('more-info', e.detail && e.detail.entityId);
 });
 
-/* Triple-tap the top-left corner to get the setup screen back. */
-let taps = [];
+/* Two fingers held still for a second brings the setup screen back.
+   It used to be a triple-tap in the top-left corner, and the corner is always
+   on top of somebody's first card - three taps on a light card is three
+   toggles. A gesture no card uses cannot be mistaken for one they do. */
+const fingers = new Map();
+let holdTimer = null;
 document.addEventListener('pointerdown', (e) => {
-  if (e.clientX > 60 || e.clientY > 60) return;
-  const now = Date.now();
-  taps = taps.filter((t) => now - t < 900).concat(now);
-  if (taps.length >= 3) { taps = []; showSetup(''); }
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  clearTimeout(holdTimer);
+  if (fingers.size === 2) {
+    holdTimer = setTimeout(() => { if (fingers.size === 2) showSetup(''); }, 1200);
+  }
 });
+document.addEventListener('pointermove', (e) => {
+  const f = fingers.get(e.pointerId);
+  if (f && Math.hypot(e.clientX - f.x, e.clientY - f.y) > 24) clearTimeout(holdTimer);
+});
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(type, (e) => { fingers.delete(e.pointerId); clearTimeout(holdTimer); });
+}

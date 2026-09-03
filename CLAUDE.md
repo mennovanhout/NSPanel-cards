@@ -4,9 +4,10 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-A HACS-installable Lovelace plugin: three custom cards for the **Sonoff NSPanel Pro 86**
-(square 480×480 wall panel, Rockchip PX30 / 2 GB / Mali-G31, Android 8.1). Distributed as a
-single JavaScript file that Home Assistant loads as a module resource.
+A HACS-installable Lovelace plugin: eleven custom cards (plus one config-only element) for
+the **Sonoff NSPanel Pro 86** (square 480×480 wall panel, Rockchip PX30 / 2 GB / Mali-G31,
+Android 8.1). Distributed as a single JavaScript file that Home Assistant loads as a module
+resource. The same card configs are rendered natively by the sibling Flutter app.
 
 Cards, in two families:
 
