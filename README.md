@@ -689,8 +689,10 @@ On the panel itself, run these cards in
 browser. It is a Flutter app that renders the same cards natively - it reads your Lovelace
 dashboard over the websocket, so the YAML in this README is the one config for both - and it
 makes the panel a Home Assistant device: proximity, illuminance, a screensaver, a speaker for
-announcements. The reason it exists is the panel's WebView: the frontend running inside it is
-most of the lag, and measured on the panel the app is not close. The
+announcements and built-in sounds, and an update entity through which the panel installs new
+releases itself. It starts on boot, and it clicks when touched. The reason it exists is the
+panel's WebView: the frontend running inside it is most of the lag, and measured on the panel
+the app is not close. The
 [tutorial](https://github.com/mennovanhout/nspanelpro-flutter/blob/main/TUTORIAL.md) goes
 from these cards to a working panel.
 

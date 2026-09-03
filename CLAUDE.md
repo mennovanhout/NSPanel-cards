@@ -33,7 +33,8 @@ dev/bench.html             preview bench: mock hass + an ha-icon stub, renders t
                            bundle in a 480x480 frame outside Home Assistant
 dev/editor.html            harness for the GUI editor: stubs ha-form, shows the emitted
                            config-changed payload, and runs the option sync check
-dev/kiosk-mock.js          fake HA websocket for kiosk/index.html?mock=1
+dev/kiosk-mock.js          fake HA websocket for kiosk/index.html?mock=1 (its alarm arms without a
+                           code and disarms with 1234 - anything else is refused, on purpose)
 dev/serve.py               no-cache static server for both (plain http.server lets Chrome
                            cache the bundle and render the previous build)
 dev/shots.ps1              drives headless Chrome over the bench to regenerate the README
@@ -300,3 +301,10 @@ git add -A && git commit -m "..." && git push
 
 Keep commit subjects short and imperative, lowercase, no trailing period, describing the
 behaviour change rather than the file touched.
+
+## A refused service call
+
+`hass.callService` rejects when Home Assistant refuses a call (a wrong alarm code). Most
+cards fire and forget; the alarm card's keypad awaits the promise and keeps itself open on a
+rejection. The kiosk page's `callService` therefore rethrows after logging, and the mock
+answers `success: false` for a bad code - keep both, or the keypad cannot tell.
