@@ -403,6 +403,32 @@ gets a text field instead.
 A mode listed in `modes` that the alarm does not support (by `supported_features`) is
 hidden rather than drawn dead.
 
+**The code is the alarm's, not the card's.** Home Assistant checks it: a disarm with a wrong
+or missing code is refused by HA itself, so nothing on the panel can get around it. What the
+card does is ask when HA will want one. An alarm set up *without* a code disarms with one tap
+here, exactly as it does in HA's own alarm panel card - give it a code.
+
+**No alarm yet?** Home Assistant ships one, the manual alarm, in `configuration.yaml`:
+
+```yaml
+alarm_control_panel:
+  - platform: manual
+    name: Home
+    code: "1234"
+    code_arm_required: false   # arm with a tap, disarm with the code
+    arming_time: 30            # seconds to leave
+    delay_time: 20             # seconds to disarm after a trigger
+    trigger_time: 300
+    disarmed:
+      trigger_time: 0
+```
+
+That gives you `alarm_control_panel.home`. Your door and motion sensors trigger it from an
+automation that calls `alarm_control_panel.alarm_trigger` while it is armed, and a second
+automation on `triggered` rings the panels (`sound:alarm`, see the app's README). The
+[Alarmo](https://github.com/nielsfaber/alarmo) integration from HACS does all of that with
+a UI - sensors per mode, a code per person, notifications - and shows up here the same way.
+
 | Option | Default | |
 | --- | --- | --- |
 | `modes` | `[home, away]` | which arm buttons, in order: `home`, `away`, `night`, `vacation`, `custom_bypass` |
