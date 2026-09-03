@@ -101,7 +101,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.8.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.8.1`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -326,7 +326,8 @@ icon: mdi:weather-night
 height: 144
 ```
 
-A single button always takes the whole card. Otherwise `columns` puts 1, 2 or 3 across — the
+`columns` puts 1, 2 or 3 across, never more than there are buttons: the buttons in a row
+always share its full width, so two buttons under `columns: 3` are two half-width buttons — the
 lower card in the picture is `columns: 3`. Six buttons is the cap; more than that on a 480px
 panel is a list of things you cannot read, let alone hit.
 
@@ -361,7 +362,7 @@ the scene did not do what you expected.
 | Option | Default | |
 | --- | --- | --- |
 | `buttons` | — | up to 6; `entity` alone is the one-button shorthand |
-| `columns` | `2` | 1–3; a single button always fills the card |
+| `columns` | `2` | 1–3, capped at the number of buttons; a row is always shared by the buttons in it |
 | `confirm` | `false` | ask for a second tap; also settable per button |
 | `confirm_text` | `Tap again` | shown while it waits |
 | `feedback_ms` | `1200` | how long the tick holds |

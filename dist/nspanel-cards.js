@@ -41,7 +41,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.8.0';
+const NSPANEL_VERSION = '0.8.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1912,11 +1912,12 @@ class NsPanelButtonCard extends NsInfoCard {
     };
   }
 
-  /* 1, 2 or 3 across; a lone button always takes the whole card, because a
-     half-width button with empty space beside it just looks like a mistake. */
+  /* 1, 2 or 3 across, and never more than there are buttons: a half-width
+     button with empty space beside it just looks like a mistake, and the
+     compact styling belongs to three across. */
   get _columns() {
-    if (this._items.length === 1) return 1;
-    return clamp(Math.round(this._config.columns) || 2, 1, 3);
+    const cols = clamp(Math.round(this._config.columns) || 2, 1, 3);
+    return Math.max(1, Math.min(cols, this._items.length));
   }
 
   static getStubConfig(hass) {
