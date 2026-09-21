@@ -5,9 +5,13 @@ Guidance for Claude Code when working in this repository.
 ## What this is
 
 A HACS-installable Lovelace plugin: thirteen custom cards (plus one config-only element) for
-the **Sonoff NSPanel Pro 86** (square 480×480 wall panel, Rockchip PX30 / 2 GB / Mali-G31,
-Android 8.1). Distributed as a single JavaScript file that Home Assistant loads as a module
-resource. The same card configs are rendered natively by the sibling Flutter app.
+the **Sonoff NSPanel Pro**, both sizes — the **Pro 86** (square 480×480, Rockchip PX30) and the
+**Pro 120** (4.7″ 750×1334, Rockchip RK3326S). Both are 2 GB / Mali-G31 / Android 8.1, so the
+performance rules below are not per-model: they hold on both. The 120 is bigger in *both*
+directions once density is applied — roughly 500×889 at its factory density of 240 — and it
+rotates. Do not reason from the raw resolutions: density decides the CSS page, and it varies
+per unit. Distributed as a single JavaScript file that Home Assistant loads as
+a module resource. The same card configs are rendered natively by the sibling Flutter app.
 
 Cards, in two families:
 
@@ -32,7 +36,9 @@ hacs.json                  HACS manifest (points at the filename above)
 README.md                  user-facing docs: options tables, YAML examples, install steps
 .github/workflows/         HACS validation + `node --check dist/nspanel-cards.js`
 dev/bench.html             preview bench: mock hass + an ha-icon stub, renders the real
-                           bundle in a 480x480 frame outside Home Assistant
+                           bundle outside Home Assistant. ?panel=120 (500x889) and
+                           ?panel=120l (889x500) switch the frame to the Pro 120;
+                           default is the Pro 86's 480x480
 dev/editor.html            harness for the GUI editor: stubs ha-form, shows the emitted
                            config-changed payload, and runs the option sync check
 dev/kiosk-mock.js          fake HA websocket for kiosk/index.html?mock=1 (its alarm arms without a
@@ -57,7 +63,8 @@ python dev/serve.py               # from the repo root, then, in another shell:
 powershell -NoProfile -File dev/shots.ps1
 ```
 
-`dev/bench.html?shot=<id>` is the bare 480x480 capture mode the script drives - ids are
+`dev/bench.html?shot=<id>` is the bare 480x480 capture mode the script drives (it passes no
+`?panel`, so the README screenshots stay Pro 86) - ids are
 `light`, `cover`, `sheet`, `climate`, `media`, `info`, `scenes`, `alarm`, `switches`,
 `status`, `sky`, one per panel in the bench.
 Loading `dev/bench.html` with no query string gives the whole rack for eyeballing changes.
@@ -95,6 +102,9 @@ breaking one is a regression even if it looks fine on a desktop.
 
 - **Browser baseline is Chromium 108.** No `color-mix()`, no CSS nesting. Colour tints are
   computed in JS (`tintStops`) precisely because `color-mix()` is unavailable.
+- **Nothing is sized to a fixed panel width.** Cards are fluid across and sized down the page
+  by `height` alone, which is what lets one bundle serve both panels. A fixed width, or a
+  media query keyed to one model, would break that - use the bench's panel switch instead.
 - **No framework, no LitElement, no dependencies.** Plain `HTMLElement` + shadow DOM.
 - **The DOM is built once** in `_build()`. Updates go through `_render()` and touch only CSS
   custom properties, `transform` and `textContent`. Never `innerHTML` on update.

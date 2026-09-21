@@ -18,11 +18,21 @@
     align-items: flex-start;
     width: max-content;
   }
-  /* 480x480 is the Pro 86's physical panel. The bench pins CSS pixels to
-     physical ones so what you see here is what fits on the glass. */
+  /* The bench pins CSS pixels to the panel's own, so what you see here is what
+     fits on the glass. ?panel=<id> picks which glass: the Pro 86 is 480x480 and
+     the default, the Pro 120 is bigger both ways and rotates.
+
+     The 120 numbers are its 750x1334 screen at the factory density of 240, i.e.
+     devicePixelRatio 1.5. Density is the whole story here and it is not fixed -
+     a unit measured at an override of 280 (dpr 1.75) reported screen 763x429 in
+     landscape instead. Run nspanel-probe-card on your own panel and trust that
+     over any of these. */
+  :root { --panel-w: 480px; --panel-h: 480px; }
+  body[data-panel="120"]  { --panel-w: 500px; --panel-h: 889px; }
+  body[data-panel="120l"] { --panel-w: 889px; --panel-h: 500px; }
   .panel {
-    width: 480px;
-    height: 480px;
+    width: var(--panel-w);
+    height: var(--panel-h);
     background: #0b0d10;
     border-radius: 18px;
     padding: 12px;
@@ -33,8 +43,16 @@
   .stack { display: flex; flex-direction: column; gap: 12px; }
   .cap { font-size: 13px; padding: 10px 2px 0; letter-spacing: .02em; }
 
-  /* ?shot=<id> renders one bare 480x480 screen and nothing else, so a headless
-     Chromium at --window-size=480,480 captures the glass 1:1. See dev/shots.ps1. */
+  .sizes { padding: 22px 28px 0; display: flex; gap: 8px; align-items: baseline;
+           font-size: 13px; }
+  .sizes a { color: #98a1b0; text-decoration: none; border: 1px solid #1e2430;
+             border-radius: 999px; padding: 4px 12px; }
+  .sizes a.on { color: #0b0d10; background: #6ee7b7; border-color: #6ee7b7; }
+  body.shot .sizes { display: none; }
+
+  /* ?shot=<id> renders one bare panel and nothing else, so a headless Chromium
+     at --window-size matching the panel captures the glass 1:1. The README
+     screenshots are all Pro 86, so shots.ps1 passes no ?panel. See dev/shots.ps1. */
   body.shot { background: #0b0d10; }
   body.shot .rack { padding: 0; gap: 0; }
   body.shot .cap { display: none; }
@@ -42,6 +60,13 @@
 </style>
 </head>
 <body>
+
+<div class="sizes">
+  <span>panel:</span>
+  <a href="?">Pro 86 · 480×480</a>
+  <a href="?panel=120">Pro 120 · 500×889</a>
+  <a href="?panel=120l">Pro 120 landscape · 889×500</a>
+</div>
 
 <div class="rack">
   <div>
@@ -399,7 +424,18 @@ window.NsPanelCards.sheetHost = document.getElementById('p-sheet');
 window.openSheet = () => sheetCard._openSheet();
 
 /* ---- capture mode ---- */
-const shot = new URLSearchParams(location.search).get('shot');
+const params = new URLSearchParams(location.search);
+
+/* Default is the Pro 86, so shots.ps1 and every existing bookmark render
+   exactly what they did before. */
+const panelId = params.get('panel') || '86';
+document.body.dataset.panel = panelId;
+document.querySelectorAll('.sizes a').forEach((a) => {
+  const id = new URLSearchParams(a.search).get('panel') || '86';
+  if (id === panelId) a.classList.add('on');
+});
+
+const shot = params.get('shot');
 if (shot) {
   document.body.classList.add('shot');
   document.querySelectorAll('.rack > div').forEach((w) => {
