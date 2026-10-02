@@ -1,5 +1,7 @@
 # NSPanel Cards
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-donate-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://bunq.me/mennovanhout)
+
 Lovelace cards built for one specific piece of hardware: the **Sonoff NSPanel Pro**, in both
 sizes — the 3.95″ 480×480 square **Pro 86**, and the 4.7″ 750×1334 **Pro 120**.
 
