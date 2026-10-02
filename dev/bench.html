@@ -106,6 +106,10 @@
     <div class="cap">switches - lit while on; three across below, one of them unavailable</div>
   </div>
   <div>
+    <div class="panel" id="p-swipe"><div class="stack" id="s-swipe"></div></div>
+    <div class="cap">swipe - the panel's own pager: two pages, dots at the bottom</div>
+  </div>
+  <div>
     <div class="panel" id="p-status"><div class="stack" id="s-status"></div></div>
     <div class="cap">Status</div>
   </div>
@@ -368,11 +372,21 @@ card('nspanel-button-card', {
 card('nspanel-button-card', {
   height: 144, columns: 3,
   buttons: [
-    { entity: 'script.goodnight', name: 'Night', icon: 'mdi:weather-night' },
+    // lit by a boolean, in its own colour, icon only
+    { entity: 'script.goodnight', icon: 'mdi:weather-night', state_entity: 'input_boolean.guest_mode',
+      color: '#a78bfa', show_name: false },
     { entity: 'scene.movie', name: 'Movie', icon: 'mdi:sofa-outline' },
     { entity: 'script.leaving', name: 'Leaving', icon: 'mdi:lock' },
   ],
 }, document.getElementById('s-scenes'));
+
+card('nspanel-swipe-card', {
+  dots: true, card_spacing: 12,
+  cards: [
+    { type: 'nspanel-light-card', entity: 'light.dining_lights', title: 'Dining table', height: 430 },
+    { type: 'nspanel-clock-card', height: 430, show_date: true },
+  ],
+}, document.getElementById('s-swipe'));
 
 card('nspanel-alarm-card', {
   entity: 'alarm_control_panel.home', title: 'Alarm', height: 200,

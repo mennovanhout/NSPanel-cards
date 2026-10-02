@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-A HACS-installable Lovelace plugin: thirteen custom cards (plus one config-only element) for
+A HACS-installable Lovelace plugin: fourteen custom cards (plus one config-only element) for
 the **Sonoff NSPanel Pro**, both sizes — the **Pro 86** (square 480×480, Rockchip PX30) and the
 **Pro 120** (4.7″ 750×1334, Rockchip RK3326S). Both are 2 GB / Mali-G31 / Android 8.1, so the
 performance rules below are not per-model: they hold on both. The 120 is bigger in *both*
@@ -26,6 +26,10 @@ Cards, in two families:
   same grid for switches, input booleans and fans, but reflecting state, with the tap
   echoed for `echo_ms` (turn_on/turn_off, never toggle). And `nspanel-alarm-card`:
   arm/disarm with a keypad (`ns-keypad`) when the entity has a `code_format`.
+- `nspanel-swipe-card` is the pager: a scroll-snap container of pages (children made with
+  HA's `loadCardHelpers().createCardElement`, or our own elements directly outside HA), dots,
+  `start`, `card_spacing`; understands simple-swipe-card's `show_pagination`. The app reads
+  any `*swipe-card` as its page list.
 - `nspanel-probe-card` is neither — a standalone diagnostics element.
 
 ## Repo layout
@@ -66,7 +70,7 @@ powershell -NoProfile -File dev/shots.ps1
 `dev/bench.html?shot=<id>` is the bare 480x480 capture mode the script drives (it passes no
 `?panel`, so the README screenshots stay Pro 86) - ids are
 `light`, `cover`, `sheet`, `climate`, `media`, `info`, `scenes`, `alarm`, `switches`,
-`status`, `sky`, one per panel in the bench.
+`swipe`, `status`, `sky`, one per panel in the bench.
 Loading `dev/bench.html` with no query string gives the whole rack for eyeballing changes.
 
 HA's `ha-icon` does not exist outside HA. `kiosk/icons.js` defines it (only if nothing else

@@ -45,7 +45,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.9.0';
+const NSPANEL_VERSION = '0.10.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1884,6 +1884,10 @@ const BUTTON_CSS = `
 /* three across is narrow; shrink to stay readable rather than clipped */
 .pad[data-cols="3"] .btn ha-icon { --mdc-icon-size: 32px; }
 .pad[data-cols="3"] .btn .bl { font-size: 15px; line-height: 19px; }
+/* icon only: the icon takes the room the name had */
+.btn.nolabel .bl { display: none; }
+.btn.nolabel ha-icon { --mdc-icon-size: 48px; }
+.pad[data-cols="3"] .btn.nolabel ha-icon { --mdc-icon-size: 40px; }
 .btn[disabled] { opacity: .45; }
 `;
 
@@ -1912,7 +1916,7 @@ class NsPanelButtonCard extends NsInfoCard {
   static get defaultOptions() {
     return {
       buttons: [], columns: 2, haptics: true, confirm: false,
-      confirm_text: 'Tap again', feedback_ms: 1200, more_info: true,
+      confirm_text: 'Tap again', feedback_ms: 1200, more_info: true, show_name: true,
     };
   }
 
@@ -1954,7 +1958,26 @@ class NsPanelButtonCard extends NsInfoCard {
       .slice(0, 6);
   }
 
-  _entityIds() { return this._items.map((i) => i.entity).filter(Boolean); }
+  _entityIds() {
+    const ids = [];
+    this._items.forEach((i) => {
+      if (i.entity) ids.push(i.entity);
+      if (i.state_entity) ids.push(i.state_entity);
+    });
+    return ids;
+  }
+
+  /* What lights the button: `state_entity` when given, else the button's own
+     entity - a running script, a switch or boolean that is on. */
+  _lit(item) {
+    const id = item.state_entity || item.entity;
+    const s = id ? this._state(id) : null;
+    return !!s && s.state === 'on';
+  }
+
+  _showName(item) {
+    return item.show_name === undefined ? !!this._config.show_name : !!item.show_name;
+  }
 
   _teardown() {
     (this._timers || []).forEach((t) => clearTimeout(t));
@@ -2039,7 +2062,12 @@ class NsPanelButtonCard extends NsInfoCard {
 
     this._btns = items.map((item) => {
       const el = document.createElement('button');
-      el.className = 'btn';
+      el.className = 'btn' + (this._showName(item) ? '' : ' nolabel');
+      // a colour of its own: the lit state uses it instead of the card's accent
+      if (item.color) {
+        el.style.setProperty('--ns-accent', String(item.color));
+        el.style.setProperty('--ns-accent-dim', tintStops(item.color).weak);
+      }
       el.innerHTML = '<ha-icon></ha-icon><div class="bl"></div>';
       const b = {
         item, el,
@@ -2064,13 +2092,12 @@ class NsPanelButtonCard extends NsInfoCard {
     if (!this._btns) return;
     this._btns.forEach((b) => {
       const s = b.item.entity ? this._state(b.item.entity) : null;
-      const running = !!s && s.state === 'on' && b.item.entity.indexOf('script.') === 0;
       // Not isBroken(): that counts `unknown` as broken, which is the normal
       // resting state of a scene or a button that has never been fired. Only a
       // missing or unavailable entity is actually a dead button.
       const broken = b.item.entity ? (!s || s.state === 'unavailable') : false;
 
-      b.el.classList.toggle('hot', b.fired || running);
+      b.el.classList.toggle('hot', b.fired || this._lit(b.item));
       if (broken) b.el.setAttribute('disabled', ''); else b.el.removeAttribute('disabled');
 
       const icon = broken ? 'mdi:alert-circle-outline'
@@ -3810,6 +3837,12 @@ const EDITOR_LABELS = {
   color: 'Colour (hex)',
   on_text: 'Text while on',
   off_text: 'Text while off',
+  show_name: 'Show names',
+  state_entity: 'Lit while this entity is on',
+  dots: 'Page dots',
+  start: 'Start on page',
+  card_spacing: 'Space between pages (px)',
+  cards: 'Pages (cards)',
   title: 'Title',
   icon: 'Icon',
   height: 'Height (px)',
@@ -4184,6 +4217,9 @@ const BUTTON_SCHEMA = [
       confirm_text: { selector: { text: {} } },
       service: { selector: { text: {} } },
       data: { selector: { object: {} } },
+      state_entity: { selector: { entity: {} } },
+      color: { selector: { text: {} } },
+      show_name: { selector: { boolean: {} } },
     }, 'name', 'entity'),
   },
   {
@@ -4193,9 +4229,23 @@ const BUTTON_SCHEMA = [
       { name: 'confirm', selector: { boolean: {} } },
       { name: 'haptics', selector: { boolean: {} } },
       { name: 'more_info', selector: { boolean: {} } },
+      { name: 'show_name', selector: { boolean: {} } },
     ],
   },
   { name: 'confirm_text', selector: { text: {} } },
+];
+
+/* The pages are whole cards, which no form draws: the object selector with
+   no fields is HA's YAML box. */
+const SWIPE_SCHEMA = [
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'dots', selector: { boolean: {} } },
+      { name: 'start', selector: { number: { min: 0, max: 20, step: 1, mode: 'box' } } },
+      { name: 'card_spacing', selector: { number: { min: 0, max: 60, step: 2, mode: 'box' } } },
+    ],
+  },
+  { name: 'cards', selector: { object: {} } },
 ];
 
 const SWITCH_SCHEMA = [
@@ -4283,6 +4333,16 @@ class NsPanelSwitchCardEditor extends NsBaseCardEditor {
   }
 }
 
+class NsPanelSwipeCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-swipe-card'; }
+  static get hasEntityRow() { return false; }
+  static get rows() { return SWIPE_SCHEMA; }
+  static get note() {
+    return 'Each page is one card, usually a vertical-stack of nspanel cards that adds up to ' +
+      'the panel height. The native app reads the same list as its pages.';
+  }
+}
+
 class NsPanelButtonCardEditor extends NsBaseCardEditor {
   static get cardType() { return 'nspanel-button-card'; }
   static get entityRequired() { return false; }
@@ -4344,6 +4404,175 @@ class NsPanelClockCardEditor extends NsBaseCardEditor {
 }
 
 /* ================================================================== *
+ * Swipe card - pages side by side, a finger moves between them
+ *
+ * The panel's own pager, so a dashboard needs nothing from HACS but this
+ * bundle. Deliberately not a JS gesture: the cards declare touch-action
+ * pan-x and release horizontal-first drags, so a native scroll-snap
+ * container picks them up and the browser pans on the compositor - no
+ * script runs during a swipe. The native app reads the same card as its
+ * list of pages. `simple-swipe-card` configs keep working: the app treats
+ * any *swipe-card the same, and this card understands show_pagination.
+ * ================================================================== */
+
+const SWIPE_CSS = `
+:host { display: block; }
+.wrap { position: relative; }
+.swipe {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: var(--ns-swipe-gap, 12px);
+}
+.swipe::-webkit-scrollbar { display: none; }
+.page {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.wrap.paged .page { padding-bottom: 22px; }
+.dots {
+  position: absolute;
+  left: 0; right: 0; bottom: 6px;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  pointer-events: none;
+}
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.22);
+  /* opacity and transform only - the budget applies here too */
+  transition: opacity .15s linear, transform .15s ease-out;
+}
+.dot.on { background: #f2f4f7; transform: scale(1.15); }
+.err { padding: 12px; color: #f87171; font: 13px/1.4 sans-serif; }
+`;
+
+class NsPanelSwipeCard extends HTMLElement {
+  static get cardType() { return 'nspanel-swipe-card'; }
+  static getConfigElement() { return document.createElement('nspanel-swipe-card-editor'); }
+  static getStubConfig() { return { cards: [], dots: true }; }
+  static get defaultOptions() { return { cards: [], dots: true, start: 0, card_spacing: 12 }; }
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._children = [];
+  }
+
+  setConfig(config) {
+    if (config && config.cards !== undefined && !Array.isArray(config.cards)) {
+      throw new Error('nspanel-swipe-card: "cards" is the list of pages');
+    }
+    const c = Object.assign({}, NsPanelSwipeCard.defaultOptions, config || {});
+    if (!Array.isArray(c.cards)) c.cards = [];
+    // simple-swipe-card's spelling, so a dashboard moves over by changing one word
+    if (config.show_pagination === false) c.dots = false;
+    c.start = Math.max(0, Math.round(Number(c.start) || 0));
+    c.card_spacing = Math.max(0, Number(c.card_spacing) || 0);
+    this._config = c;
+    this._build();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._children.forEach((el) => { el.hass = hass; });
+  }
+
+  get hass() { return this._hass; }
+
+  /* The tallest page; HA asks before the children exist, so guess roomy. */
+  getCardSize() {
+    let max = 0;
+    this._children.forEach((el) => {
+      const n = typeof el.getCardSize === 'function' ? el.getCardSize() : 0;
+      if (typeof n === 'number' && n > max) max = n;
+    });
+    return max || 8;
+  }
+
+  getLayoutOptions() { return { grid_columns: 'full', grid_rows: 'auto' }; }
+
+  /* Outside Home Assistant (the bench) there are no card helpers; our own
+     elements can still be made directly. */
+  static _bare(child) {
+    const tag = String(child.type || '').replace(/^custom:/, '');
+    if (!customElements.get(tag)) throw new Error(`${tag}: not available outside Home Assistant`);
+    const el = document.createElement(tag);
+    el.setConfig(child);
+    return el;
+  }
+
+  async _build() {
+    const cfg = this._config;
+    const show = cfg.dots && cfg.cards.length > 1;
+    this.shadowRoot.innerHTML = `
+      <style>${SWIPE_CSS}</style>
+      <div class="wrap ${show ? 'paged' : ''}">
+        <div class="swipe" style="--ns-swipe-gap:${cfg.card_spacing}px"></div>
+        <div class="dots" ${show ? '' : 'hidden'}></div>
+      </div>
+    `;
+    const swipe = this.shadowRoot.querySelector('.swipe');
+    const dots = this.shadowRoot.querySelector('.dots');
+    const helpers = window.loadCardHelpers ? await window.loadCardHelpers() : null;
+    if (this._config !== cfg) return; // reconfigured while the helpers loaded
+    this._children = cfg.cards.map((child) => {
+      const page = document.createElement('div');
+      page.className = 'page';
+      let el;
+      try {
+        el = helpers ? helpers.createCardElement(child) : NsPanelSwipeCard._bare(child);
+      } catch (e) {
+        el = document.createElement('div');
+        el.className = 'err';
+        el.textContent = String(e && e.message || e);
+      }
+      if (this._hass) el.hass = this._hass;
+      page.appendChild(el);
+      swipe.appendChild(page);
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      dots.appendChild(dot);
+      return el;
+    });
+
+    let shown = -1;
+    const mark = (i) => {
+      if (i === shown) return;
+      shown = i;
+      const all = dots.children;
+      for (let n = 0; n < all.length; n++) all[n].classList.toggle('on', n === i);
+    };
+    const stride = () => (swipe.clientWidth || 1) + cfg.card_spacing;
+    let queued = false;
+    swipe.addEventListener('scroll', () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        mark(Math.round(swipe.scrollLeft / stride()));
+      });
+    }, { passive: true });
+    mark(0);
+    if (cfg.start > 0) {
+      requestAnimationFrame(() => {
+        swipe.scrollLeft = Math.min(cfg.start, cfg.cards.length - 1) * stride();
+      });
+    }
+  }
+}
+
+/* ================================================================== *
  * Screensaver config card
  *
  * Not a card: a place in the dashboard to configure the native app's
@@ -4379,6 +4608,7 @@ customElements.define('nspanel-sensors-card', NsPanelSensorsCard);
 customElements.define('nspanel-status-card', NsPanelStatusCard);
 customElements.define('nspanel-weather-card', NsPanelWeatherCard);
 customElements.define('nspanel-clock-card', NsPanelClockCard);
+customElements.define('nspanel-swipe-card', NsPanelSwipeCard);
 customElements.define('nspanel-screensaver', NsPanelScreensaverCard);
 
 customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
@@ -4387,6 +4617,7 @@ customElements.define('nspanel-climate-card-editor', NsPanelClimateCardEditor);
 customElements.define('nspanel-media-card-editor', NsPanelMediaCardEditor);
 customElements.define('nspanel-button-card-editor', NsPanelButtonCardEditor);
 customElements.define('nspanel-switch-card-editor', NsPanelSwitchCardEditor);
+customElements.define('nspanel-swipe-card-editor', NsPanelSwipeCardEditor);
 customElements.define('nspanel-alarm-card-editor', NsPanelAlarmCardEditor);
 customElements.define('nspanel-sensor-card-editor', NsPanelSensorCardEditor);
 customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
@@ -4425,6 +4656,12 @@ window.customCards.push(
     name: 'NSPanel Button',
     description: 'Scenes, scripts and automations. Big targets, and it tells you the tap landed.',
     preview: true,
+  },
+  {
+    type: 'nspanel-swipe-card',
+    name: 'NSPanel Swipe',
+    description: 'Pages side by side, swiped. The panel\'s own pager; the app reads it as its pages.',
+    preview: false,
   },
   {
     type: 'nspanel-switch-card',
@@ -4495,6 +4732,7 @@ window.NsPanelCards = {
   NsPanelMediaCard,
   NsPanelButtonCard,
   NsPanelSwitchCard,
+  NsPanelSwipeCard,
   NsPanelAlarmCard,
   NsPanelSensorCard,
   NsPanelSensorsCard,
@@ -4508,6 +4746,7 @@ window.NsPanelCards = {
   NsPanelMediaCardEditor,
   NsPanelButtonCardEditor,
   NsPanelSwitchCardEditor,
+  NsPanelSwipeCardEditor,
   NsPanelAlarmCardEditor,
   NsPanelSensorCardEditor,
   NsPanelSensorsCardEditor,

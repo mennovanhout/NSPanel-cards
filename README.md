@@ -50,6 +50,7 @@ It starts with installing these cards.
 | Card | What it does |
 | --- | --- |
 | `custom:nspanel-button-card` | Scenes, scripts, automations. One big button, or up to six in a 1–3 column grid. Tells you the tap landed, and can ask twice before doing something drastic. |
+| `custom:nspanel-swipe-card` | Pages side by side, swiped, with dots. The panel's own pager, so nothing else from HACS is needed; the native app reads it as its list of pages. |
 | `custom:nspanel-switch-card` | Switches, input booleans, fans: the same grid, but each tile reflects its entity — lit while on — and a tap turns it the other way, echoed at once. |
 | `custom:nspanel-alarm-card` | Arm and disarm an alarm. A button per mode, one Disarm when it is set, and a full-screen keypad when the alarm wants a code. |
 
@@ -108,7 +109,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.9.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.10.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -320,7 +321,7 @@ buttons:
 ```
 
 </td>
-<td><img src="docs/images/scenes.png" alt="A four-button grid: Goodnight, Good morning, Movie and Leaving, with Leaving highlighted green because its script is running; below it a three-across row of the same buttons" width="300"></td>
+<td><img src="docs/images/scenes.png" alt="A four-button grid: Goodnight, Good morning, Movie and Leaving, with Leaving highlighted green because its script is running; below it a three-across row where the first button is icon-only and lit violet by a boolean" width="300"></td>
 </tr>
 </table>
 
@@ -336,7 +337,7 @@ height: 144
 
 `columns` puts 1, 2 or 3 across, never more than there are buttons: the buttons in a row
 always share its full width, so two buttons under `columns: 3` are two half-width buttons — the
-lower card in the picture is `columns: 3`. Six buttons is the cap; more than that on a 480px
+lower card in the picture is `columns: 3`, its first button icon-only and lit by a boolean. Six buttons is the cap; more than that on a 480px
 panel is a list of things you cannot read, let alone hit.
 
 **Every other card here reflects a state. These do not.** You press "Goodnight", the house
@@ -377,7 +378,67 @@ the scene did not do what you expected.
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
-Per button: `entity`, `name`, `icon`, `service`, `data`, `confirm`, `confirm_text`.
+**Lit by something else, in its own colour, or icon only.** A button is lit while its own
+entity is `on` - a running script, a switch, a boolean. `state_entity` lights it from another
+entity instead: a scene button that glows while the `input_boolean` your automation sets is
+on. `color` gives that button its own lit colour, and `show_name: false` drops the name so
+the icon takes the room, on the card or per button:
+
+```yaml
+type: custom:nspanel-button-card
+height: 144
+columns: 3
+show_name: false
+buttons:
+  - entity: script.movie_mode
+    icon: mdi:movie-open
+    state_entity: input_boolean.movie_mode
+    color: '#a78bfa'
+  - entity: script.normal
+    icon: mdi:skip-backward
+  - entity: scene.bright
+    icon: mdi:white-balance-sunny
+    show_name: true
+    name: Bright
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `show_name` | `true` | `false` shows the icon only; also settable per button |
+
+Per button: `entity`, `name`, `icon`, `service`, `data`, `confirm`, `confirm_text`,
+`state_entity`, `color`, `show_name`.
+
+### Swipe
+
+```yaml
+type: custom:nspanel-swipe-card
+dots: true            # the page dots at the bottom; default true
+start: 0              # the page to open on; default 0
+card_spacing: 12      # px between pages; default 12
+cards:
+  - type: vertical-stack
+    cards: [...]      # page 1
+  - type: vertical-stack
+    cards: [...]      # page 2
+```
+
+The panel's own pager: pages side by side, a finger moves between them, dots say where you
+are. Each page is one card, usually a vertical-stack that adds up to the panel's height. It is
+a native scroll-snap container, not a script - the cards release sideways drags to it and the
+browser pans on the compositor, which is the smoothest thing this hardware does. The native app
+reads the same card as its list of pages and honours `dots` and `start`.
+
+If you already use [simple-swipe-card](https://github.com/nutteloost/simple-swipe-card),
+nothing changes: the app treats any swipe card the same, and this card understands
+`show_pagination: false` too. Switching is one word in the YAML.
+
+| Option | Default | |
+| --- | --- | --- |
+| `cards` | — | the pages |
+| `dots` | `true` | page dots; `show_pagination: false` means the same |
+| `start` | `0` | first page shown |
+| `card_spacing` | `12` | px between pages |
 
 ### Switches
 
@@ -681,7 +742,7 @@ kiosk_mode:
 views:
   - type: panel
     cards:
-      - type: custom:simple-swipe-card
+      - type: custom:nspanel-swipe-card
         card_spacing: 12
         cards:
           - type: vertical-stack

@@ -146,6 +146,7 @@ const ALL_CARDS = [
   ['nspanel-media-card', 'media_player.kitchen'],
   ['nspanel-button-card', 'script.goodnight'],
   ['nspanel-switch-card', 'switch.garden_lights'],
+  ['nspanel-swipe-card', null],
   ['nspanel-alarm-card', 'alarm_control_panel.home'],
   ['nspanel-sensor-card', 'sensor.co2'],
   ['nspanel-sensors-card', null],
@@ -167,7 +168,8 @@ function syncReport() {
     document.body.appendChild(probe);
     const cfg = { type: 'custom:' + tag };
     if (entity) cfg.entity = entity;
-    if (!entity && tag.indexOf('clock') === -1) cfg.entities = ['sensor.x'];
+    if (!entity && tag.indexOf('clock') === -1 && tag.indexOf('swipe') === -1) cfg.entities = ['sensor.x'];
+    if (tag.indexOf('swipe') !== -1) cfg.cards = [];
     try {
       probe.setConfig(cfg);
     } catch (e) {
