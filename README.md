@@ -1231,3 +1231,12 @@ identical page numbering in both renderers. Both new options and nested button
 actions survive the visual editor.
 
 Run `python3 dev/check-navigation-tests.py --browser /path/to/chromium` for fake-HA navigation, timing, dialog ownership, editor and touch-geometry regressions.
+
+### Navigation example in the browser
+
+Actual 480×480 browser captures with simulated entities and the kiosk icon renderer.
+The demonstration uses a 3-second idle interval; the default remains disabled.
+
+| Local command to page 1 | Idle return to start page 2 |
+| --- | --- |
+| ![Local navigation to page 1](docs/images/navigation/page-1.png) | ![Automatic return to start page 2](docs/images/navigation/idle-home.png) |
