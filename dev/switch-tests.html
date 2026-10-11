@@ -41,7 +41,8 @@ async function run() {
   await test('shorthand hold uses trimmed target; tap and state keep primary', async () => {
     await mount({entity:'switch.primary', detail_entity:' light.detail '});
     hold();
-    assert(opened.join() === 'light.detail' && !calls.length, 'hold routing or no-service contract failed');
+    assert(card._lightDialog?.config.entity === 'light.detail' && !opened.length && !calls.length, 'hold routing or no-service contract failed');
+    sheet().close();
     const button = card.shadowRoot.querySelector('.btn');
     assert(button.querySelector('.st').textContent === 'Off', 'state does not reflect primary');
     button.click();
@@ -52,8 +53,8 @@ async function run() {
       {entity:'switch.primary', detail_entity:'light.detail'},
       {entity:'input_boolean.secondary', detail_entity:'sensor.detail'},
     ]});
-    hold(0); hold(1);
-    assert(opened.join() === 'light.detail,sensor.detail' && !calls.length, 'grid targets not independent');
+    hold(0); assert(card._lightDialog?.config.entity === 'light.detail','light detail target'); sheet().close(); hold(1);
+    assert(opened.join() === 'sensor.detail' && !calls.length, 'grid targets not independent');
     card.shadowRoot.querySelectorAll('.btn')[1].click();
     assert(calls[0].data.entity_id === 'input_boolean.secondary' && calls[0].service === 'turn_off', 'secondary tap redirected');
   });
