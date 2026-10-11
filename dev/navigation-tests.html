@@ -20,8 +20,10 @@ async function run(){
  await test('local action bubbles through nested shadow roots and sends no HA command',async()=>{
   const swipe=await mount();const card=swipe._children[2];
   const nested=document.createElement('div');nested.attachShadow({mode:'open'});card.parentNode.append(nested);nested.shadowRoot.append(card);
+  // Let layout-induced scroll anchoring settle before the simulated user tap.
+  await pause(180);
   const b=card.shadowRoot.querySelector('button');b.click();await pause(650);
-  assert(swipe._nsNavigation.current===1,'wrong destination');assert(!calls.length,'HA service called');
+  assert(swipe._nsNavigation.current===1,'wrong destination '+JSON.stringify({current:swipe._nsNavigation.current,pending:swipe._nsNavigation.pending,busy:swipe._nsNavigation.busy,disabled:b.disabled,owner:nsNavigationOwner(card)===swipe,left:swipe.shadowRoot.querySelector('.swipe').scrollLeft}));assert(!calls.length,'HA service called');
  });
  await test('same page command works after manual scroll and does not affect another instance',async()=>{
   const a=await mount(),b=await mount();a._nsNavigation.navigate(4,false);await pause(160);
