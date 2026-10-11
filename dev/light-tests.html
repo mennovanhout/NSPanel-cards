@@ -283,7 +283,8 @@ async function run() {
     assert(onColor!=='rgb(255, 183, 74)','HS power still amber');
     setState(colorState('off',{brightness:null,hs_color:null,rgb_color:null,color_mode:null,color_temp_kelvin:null,effect:null}));await pause();
     assert(d.values().brightness===128/255&&d.values().hue===.5,'last levels missing');
-    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===onColor,'off power lost remembered hue');
+    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor==='rgb(22, 25, 31)','off RGB power is not neutral');
+    assert(getComputedStyle(sheet()._actions.lastChild).color==='rgb(255, 255, 255)','off RGB power text is not light');
     assert(sheet()._state.textContent==='Off · last values','history label missing');
     assert(!card._card.classList.contains('on')&&card._card.style.getPropertyValue('--ns-fill')==='0','off tile appears on');
     d.browse('Effects');const selected=d.choices.children[0];assert(selected.classList.contains('selected')&&!selected.disabled,'last effect cannot be used to switch on');
@@ -306,14 +307,16 @@ async function run() {
     assert(warm!=='rgb(255, 183, 74)','TW power still amber');
     setState(colorState('off',{brightness:null,hs_color:null,color_mode:null,color_temp_kelvin:null}));await pause();
     assert(d.channels()[0]==='temperature'&&Math.abs(d.values().temperature-2000/4500)<.00001,'temperature mode lost');
-    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===warm,'off power lost remembered white');
+    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor==='rgb(22, 25, 31)','off TW power is not neutral');
     setState(state(['onoff'],'off',{brightness:null}));await pause();assert(d.channels().length===0,'cached capabilities resurrected');
     setState(state(['rgb'],'unavailable'));await pause();assert(!d.available(),'history hides unavailable');
   });
   await test('power preview respects explicit accent and follow_color false',async()=>{
     for(const [config,expected] of [[{accent:'#12abcd'},'rgb(18, 171, 205)'],[{follow_color:false},'rgb(255, 183, 74)']]) {
-      await details(config,colorState('off'));
+      await details(config,colorState('on'));
       assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===expected,'configured accent ignored');
+      setState(colorState('off'));await pause();
+      assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor==='rgb(22, 25, 31)','accent overrode neutral off power');
       assert(calls.length===0,'preview sent command');
     }
   });

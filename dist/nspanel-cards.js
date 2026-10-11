@@ -923,7 +923,7 @@ class LightDialog {
       ...(p.white&&p.color?[action(this.white?'Colour':'White','mdi:palette',()=>{this.white=!this.white;this.active='brightness';this.render();},!this.drag)]:[]),
       ...(this.presets().length?[action('Presets','mdi:format-list-bulleted',()=>this.browse('Presets'),!this.drag)]:[]),
       ...(this.favorites().length?[action('Effects','mdi:creation',()=>this.browse('Effects'),!this.drag)]:[]),
-      action(on?'Turn off':'Turn on','mdi:power',()=>this.send('light',on?'turn_off':'turn_on',{entity_id:this.config.entity},true),available&&!this.busy&&!this.drag,true,!available),
+      action(on?'Turn off':'Turn on','mdi:power',()=>this.send('light',on?'turn_off':'turn_on',{entity_id:this.config.entity},true),available&&!this.busy&&!this.drag,on,!available),
     ];
     return {title:this.page||this.config.title||this.config.name||friendly(s,this.config.entity),
       state:(available?(on?'On':this.hasLastValues()?'Off · last values':'Off'):'Unavailable')+(this.error?' · '+this.error:this.page==='Effects'&&this.attributes().effect?' · '+this.attributes().effect:''),
