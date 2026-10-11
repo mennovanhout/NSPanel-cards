@@ -25,6 +25,12 @@ async function run(){
   const b=card.shadowRoot.querySelector('button');b.click();await pause(650);
   assert(swipe._nsNavigation.current===1,'wrong destination '+JSON.stringify({current:swipe._nsNavigation.current,pending:swipe._nsNavigation.pending,busy:swipe._nsNavigation.busy,disabled:b.disabled,owner:nsNavigationOwner(card)===swipe,left:swipe.shadowRoot.querySelector('.swipe').scrollLeft}));assert(!calls.length,'HA service called');
  });
+ await test('first offline render has labels and navigation without hass',async()=>{
+  const box=document.createElement('div');box.className='panel';fixture.append(box);
+  const swipe=document.createElement('nspanel-swipe-card');swipe.setConfig(config());box.append(swipe);await pause(250);
+  const b=swipe._children[2].shadowRoot.querySelector('button');assert(b.textContent.trim()==='Go'&&!b.disabled,'offline button missing '+JSON.stringify({text:b.textContent,disabled:b.disabled,owner:nsNavigationOwner(swipe._children[2])===swipe,raf:swipe._children[2]._raf}));
+  b.click();await pause(650);assert(swipe._nsNavigation.current===1&&!calls.length,'offline navigation failed');
+ });
  await test('same page command works after manual scroll and does not affect another instance',async()=>{
   const a=await mount(),b=await mount();a._nsNavigation.navigate(4,false);await pause(160);
   const sc=a.shadowRoot.querySelector('.swipe');a._programmatic=false;sc.scrollLeft=(sc.clientWidth+12);await pause(200);
