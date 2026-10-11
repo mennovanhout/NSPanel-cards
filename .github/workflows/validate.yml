@@ -29,3 +29,5 @@ jobs:
       - run: node --check dist/nspanel-cards.js
       - name: Light capability and gesture regressions
         run: python3 dev/check-light-tests.py
+      - name: Switch detail target regressions
+        run: python3 dev/check-switch-tests.py

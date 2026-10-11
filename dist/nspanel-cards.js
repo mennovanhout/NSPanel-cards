@@ -2281,7 +2281,7 @@ class NsPanelSwitchCard extends NsInfoCard {
     const cfg = this._config;
     const list = Array.isArray(cfg.switches) && cfg.switches.length
       ? cfg.switches
-      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon }] : []);
+      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon, detail_entity: cfg.detail_entity }] : []);
     return list
       .map((it) => (typeof it === 'string' ? { entity: it } : it))
       .filter((it) => it && it.entity)
@@ -2365,7 +2365,11 @@ class NsPanelSwitchCard extends NsInfoCard {
       el.addEventListener('click', () => this._press(b));
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (this._config.more_info) moreInfo(this, item.entity);
+        if (this._config.more_info) {
+          const target = typeof item.detail_entity === 'string' && item.detail_entity.trim()
+            ? item.detail_entity.trim() : item.entity;
+          moreInfo(this, target);
+        }
       });
       pad.appendChild(el);
       return b;
@@ -3924,6 +3928,7 @@ const EDITOR_LABELS = {
   entities: 'Entities',
   buttons: 'Buttons',
   switches: 'Switches',
+  detail_entity: 'Long-press detail entity',
   severity: 'Severity colours',
   name: 'Name',
   brightness_pct: 'Brightness (%)',
@@ -4377,6 +4382,7 @@ const SWIPE_SCHEMA = [
 ];
 
 const SWITCH_SCHEMA = [
+  { name: 'detail_entity', selector: { entity: {} } },
   { name: 'title', selector: { text: {} } },
   {
     name: '', type: 'grid', schema: [
@@ -4388,6 +4394,7 @@ const SWITCH_SCHEMA = [
   {
     name: 'switches', selector: listOf({
       entity: { required: true, selector: { entity: { domain: SWITCH_DOMAINS } } },
+      detail_entity: { selector: { entity: {} } },
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
       show_name: { selector: { boolean: {} } },
