@@ -891,6 +891,13 @@ bundle so Lovelace does not show "custom element doesn't exist" where it sits. P
 end of a vertical-stack rather than as its own page of a swipe card, or the browser gets a
 blank page. All of its options are documented in the app's README.
 
+The native-only option `keep_awake_on_proximity: true` inhibits automatic sleep
+while proximity is detected (default false). It has no web behavior and no web
+editor control. Native `after`, `sleep`, and `sleep_after` retain their existing
+meaning: for example, 15, true, and 0 switch the backlight off after 15 idle seconds;
+MQTT can later change `sleep_after` to show the screensaver first. See the native
+app README for display ownership, sensor thresholds and the 500 ms wake touch guard.
+
 ## The native app
 
 On the panel itself, run these cards in
