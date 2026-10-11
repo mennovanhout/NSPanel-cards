@@ -497,7 +497,26 @@ greyed out and says so. A long-press opens more-info.
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
-Per switch: `entity`, `name`, `icon`, `show_name`, `show_state`.
+Per switch: `entity`, `detail_entity`, `name`, `icon`, `show_name`, `show_state`.
+`detail_entity` optionally selects a different entity for long-press more-info;
+it is also accepted beside `entity` in the single-switch shorthand. A short tap,
+tile state and availability still use `entity`. Without a non-empty string target,
+details use `entity` as before. `more_info: false` disables details for either target.
+No entity relationship is inferred. The native app opens its matching detail sheet;
+the browser opens Home Assistant more-info. Older bundles ignore this option.
+
+```yaml
+type: custom:nspanel-switch-card
+switches:
+  - entity: switch.extractor_power
+    detail_entity: fan.extractor
+    name: Extractor
+    icon: mdi:fan
+```
+
+Run `python3 dev/check-switch-tests.py --browser /path/to/chromium` to verify
+target routing, unchanged tap commands, fallback values, configuration updates
+and editor support with fake HA.
 
 ### Camera
 
@@ -998,6 +1017,24 @@ Android 8.1. It is not what every panel runs. A Pro 120 measured for this repo r
 because Android System WebView updates through the Play Store and a panel that has never had
 one is still a panel this has to work on — but if your own probe reports a recent WebView, the
 card is not what is holding your dashboard back.
+
+### Swap tap and hold actions
+
+Light cards and switch cards support `swap_press_actions: true` (default
+`false`). Tap opens details; hold performs the usual power action exactly once.
+For a switch list, each entry may override the card setting with a boolean.
+`detail_entity` still selects only the detail target; power uses the original
+entity. Light `long_press: none` and switch `more_info: false` still disable
+only the detail action, including when it moves to tap. Dragging and presets
+keep their existing actions. Unavailable devices cannot send power commands.
+
+```yaml
+type: custom:nspanel-light-card
+entity: light.example
+swap_press_actions: true
+long_press: sheet
+show_presets: false
+```
 
 ## Licence
 
