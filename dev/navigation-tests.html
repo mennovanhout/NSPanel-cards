@@ -1,0 +1,100 @@
+<!doctype html><meta charset="utf-8"><title>Navigation regressions</title>
+<style>body{margin:0;background:#0b0d10;color:white}#fixture{display:flex;gap:20px}.panel{width:480px;height:480px}#result{white-space:pre-wrap}</style>
+<div id="fixture"></div><pre id="result">Running</pre>
+<script src="../dist/nspanel-cards.js"></script><script>
+if (!customElements.get('ha-icon')) customElements.define('ha-icon',class extends HTMLElement{});
+const results=[],calls=[],fixture=document.querySelector('#fixture');
+const assert=(ok,message)=>{if(!ok)throw Error(message);};
+const pause=(ms=60)=>new Promise(r=>setTimeout(r,ms));
+const button=(page,name='Go')=>({type:'custom:nspanel-button-card',height:120,haptics:false,buttons:[{name,tap_action:{action:'navigate-page',page}}]});
+const config=()=>({start:2,return_to_start_after:15,return_to_start_overrides:[{page:5,after:60}],cards:[button(4),button(4),button(1),button(1),button(1),button(1)]});
+const hass={states:{'light.test':{entity_id:'light.test',state:'on',attributes:{supported_color_modes:['brightness'],brightness:128}}},callService:(...args)=>{calls.push(args);return Promise.resolve();}};
+async function mount(cfg=config()) {
+ const box=document.createElement('div');box.className='panel';fixture.append(box);
+ const swipe=document.createElement('nspanel-swipe-card');swipe.setConfig(cfg);box.append(swipe);swipe.hass=hass;await pause(250);
+ return swipe;
+}
+async function test(name,run){try{fixture.replaceChildren();calls.length=0;await run();results.push({name,passed:true});}catch(e){results.push({name,passed:false,error:e.stack});}}
+function controller(){let time=0;const moves=[],closed=[];const nav=new NsIdleNavigation((p,a)=>moves.push({p,a}),()=>closed.push(true),()=>time);nav.configure(config());nav.current=2;nav.activity();return{nav,moves,closed,time:(v)=>time=v};}
+async function run(){
+ await test('local action bubbles through nested shadow roots and sends no HA command',async()=>{
+  const swipe=await mount();const card=swipe._children[2];
+  const nested=document.createElement('div');nested.attachShadow({mode:'open'});card.parentNode.append(nested);nested.shadowRoot.append(card);
+  const b=card.shadowRoot.querySelector('button');b.click();await pause(650);
+  assert(swipe._nsNavigation.current===1,'wrong destination');assert(!calls.length,'HA service called');
+ });
+ await test('same page command works after manual scroll and does not affect another instance',async()=>{
+  const a=await mount(),b=await mount();a._nsNavigation.navigate(4,false);await pause(160);
+  const sc=a.shadowRoot.querySelector('.swipe');a._programmatic=false;sc.scrollLeft=(sc.clientWidth+12);await pause(200);
+  a._nsNavigation.navigate(4,false);await pause(180);
+  assert(a._nsNavigation.current===4,'repeat command lost');assert(b._nsNavigation.current===2,'other instance moved');
+ });
+ await test('invalid explicit action cannot fall through to service; entity availability is irrelevant',async()=>{
+  const c=config();c.cards[2]=button(1);Object.assign(c.cards[2].buttons[0],{entity:'switch.missing',service:'switch.turn_on'});
+  const s=await mount(c);s._children[2].shadowRoot.querySelector('button').click();await pause(650);
+  assert(s._nsNavigation.current===1&&!calls.length,'local action failed');
+  for(const page of [-1,6,1.5,'1',null]) {const before=s._nsNavigation.current;const item={service:'switch.turn_on',tap_action:{action:'navigate-page',page}};assert(s._children[2]._fire(item)===false,'invalid accepted');assert(s._nsNavigation.current===before&&!calls.length,'invalid side effect');}
+ });
+ await test('reconfiguration replaces targets, clamps removed current page and handles empty cards',async()=>{
+  const s=await mount();const c=config();c.cards[2]=button(5);s.setConfig(c);await pause(180);s._children[2].shadowRoot.querySelector('button').click();await pause(650);assert(s._nsNavigation.current===5,'stale binding');
+  s.setConfig({start:0,cards:[button(0)]});await pause(200);assert(s._nsNavigation.current===0,'removed page remained');
+  s.setConfig({cards:[]});await pause();assert(!s._nsNavigation.navigate(0),'empty navigation accepted');
+ });
+ await test('15-second boundary, arbitrary page override and repeated explicit commands',()=>{
+  const {nav,time}=controller();nav.navigate(1);time(14999);nav.check();assert(nav.current===1,'early');time(15000);nav.check();assert(nav.current===2,'late');
+  nav.navigate(5);time(74999);nav.check();assert(nav.current===5,'override early');time(75000);nav.check();assert(nav.current===2,'override late');
+  nav.navigate(1);time(85000);nav.navigate(1);time(90000);nav.check();assert(nav.current===1,'same target did not renew');nav.dispose();
+ });
+ await test('held fingers, cancellation and scroll settling defer until a fresh full interval',()=>{
+  const {nav,time}=controller();nav.navigate(1);nav.pointer(10,true);nav.pointer(11,true);time(60000);nav.check();assert(nav.current===1,'held finger ignored');
+  nav.pointer(10,false);nav.scroll(true);nav.pointer(11,false);nav.navigate(4);nav.navigate(5);assert(nav.current===1,'moved mid scroll');nav.scroll(false);assert(nav.current===5,'pending order');
+  time(119999);nav.check();assert(nav.current===5,'release interval');time(120000);nav.check();assert(nav.current===2,'release expiry');nav.dispose();
+ });
+ await test('background preserves absolute deadline; disabled function and page override stay put',()=>{
+  const {nav,time,moves}=controller();nav.navigate(1);nav.visibility(false);time(30000);nav.check();assert(nav.current===1,'background action');nav.visibility(true);assert(nav.current===2&&!moves.at(-1).a,'resume not immediate');
+  nav.configure({...config(),return_to_start_after:0});nav.navigate(5);time(100000);nav.check();assert(nav.current===5,'disabled moved');
+  nav.configure({...config(),return_to_start_overrides:[{page:1,after:0}]});nav.navigate(1);time(200000);nav.check();assert(nav.current===1,'page off moved');nav.dispose();
+ });
+ await test('HA updates and identical config do not renew deadline',async()=>{
+  const s=await mount();let now=0;s._nsNavigation.now=()=>now;s._nsNavigation.navigate(1,false);await pause(180);
+  now=14000;s.hass={...hass};s.setConfig(config());now=15000;s._nsNavigation.check(false);assert(s._nsNavigation.current===2,'deadline renewed');
+ });
+ await test('body sheet belongs to opening instance; dialog input renews only its owner',async()=>{
+  const a=await mount(),b=await mount();let now=0;a._nsNavigation.now=b._nsNavigation.now=()=>now;
+  sheet().open({owner:a._children[2],title:'Owned',state:'Ready',value:.5,onCommit:()=>calls.push('commit')});
+  assert(a._dialogs.has(sheet())&&!b._dialogs.has(sheet()),'owner missing');
+  now=10000;sheet().dispatchEvent(new PointerEvent('pointerdown',{pointerId:9}));
+  now=30000;a._nsNavigation.check();assert(a._dialogs.size===1,'held dialog closed');
+  sheet().dispatchEvent(new PointerEvent('pointerup',{pointerId:9}));
+  b._nsNavigation.activity();now=45000;b._nsNavigation.check();assert(a._dialogs.size===1,'other instance closed dialog');
+  a._nsNavigation.check();assert(a._dialogs.size===0&&!calls.length,'own close caused action');await pause(220);
+ });
+ await test('keypad closes without submit; delayed close cannot remove a reopened keypad',async()=>{
+  const s=await mount();let now=0;s._nsNavigation.now=()=>now;
+  keypad().open({owner:s._children[2],title:'Code',onSubmit:()=>{calls.push('submit');return Promise.resolve(true);}});
+  now=15000;s._nsNavigation.check();keypad().open({owner:s._children[2],title:'New',onSubmit:()=>Promise.resolve(true)});
+  await pause(230);assert(keypad().isConnected,'old close removed new keypad');assert(!calls.length,'submitted during close');keypad().close();await pause(220);
+ });
+ await test('external HA dialog suspends return and close starts a new interval',async()=>{
+  const s=await mount();let now=0;s._nsNavigation.now=()=>now;s._nsNavigation.navigate(1,false);await pause(180);
+  s.dispatchEvent(new CustomEvent('hass-more-info',{detail:{entityId:'sensor.test'},bubbles:true,composed:true}));now=60000;s._nsNavigation.check();assert(s._nsNavigation.current===1,'external context moved');
+  window.dispatchEvent(new CustomEvent('dialog-closed',{detail:{dialog:'ha-more-info-dialog'}}));now=74999;s._nsNavigation.check();assert(s._nsNavigation.current===1,'closed early');now=75000;s._nsNavigation.check();assert(s._nsNavigation.current===2,'closed late');
+ });
+ await test('disconnect disposes pending callbacks and reconnect remains usable',async()=>{
+  const s=await mount(),box=s.parentNode;s._nsNavigation.navigate(5,false);s.remove();assert(s._nsNavigation.disposed,'not disposed');box.append(s);await pause(220);assert(s._nsNavigation.navigate(1,false),'reconnect lost');
+ });
+ await test('editor schemas expose local actions and preserve nested values',()=>{
+  const field=BUTTON_SCHEMA.find(r=>r.name==='buttons').selector.object.fields.tap_action;assert(field.selector.object.fields.page,'missing action editor');
+  const ed=NsPanelSwipeCard.getConfigElement();ed.setConfig({type:'custom:nspanel-swipe-card',...config()});ed._valueChanged({stopPropagation(){},detail:{value:{dots:false}}});
+  assert(ed._config.return_to_start_after===15&&ed._config.return_to_start_overrides[0].after===60,'editor dropped idle options');
+  const be=NsPanelButtonCard.getConfigElement();be.setConfig(button(3));be._valueChanged({stopPropagation(){},detail:{value:{height:140}}});assert(be._config.buttons[0].tap_action.page===3,'editor dropped action');
+ });
+ await test('navigation row hit targets exceed 56px at 480px; no horizontal overflow',async()=>{
+  const c=config();c.cards[2]={...button(1),columns:3,buttons:[...button(1,'Licht').buttons,...button(3,'Rollläden').buttons,...button(4,'Klima').buttons]};
+  const s=await mount(c);const row=s._children[2];for(const b of row.shadowRoot.querySelectorAll('button')){const r=b.getBoundingClientRect();assert(r.width>=56&&r.height>=56,'small target');}assert(row.scrollWidth<=480,'overflow');
+ });
+ fixture.replaceChildren();await pause(250);
+ document.querySelector('#result').textContent=JSON.stringify(results,null,2);document.documentElement.dataset.testStatus=results.every(r=>r.passed)?'passed':'failed';
+}
+run().catch(e=>{document.documentElement.dataset.testStatus='failed';document.querySelector('#result').textContent=e.stack;});
+</script>

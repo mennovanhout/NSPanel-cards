@@ -503,6 +503,9 @@ class NsSheet extends HTMLElement {
             actions:[{label, icon, primary, run}] } */
   open(opts) {
     clearTimeout(this._closeTimer);
+    nsOwnDialog(this, opts.owner);
+    this._nsGeneration = (this._nsGeneration || 0) + 1;
+    clearTimeout(this._closeTimer);
     if (this._opts && this._opts.onClose) this._opts.onClose();
     this._trackActive = false;
     this.update(opts);
@@ -579,6 +582,8 @@ class NsSheet extends HTMLElement {
   }
 
   close() {
+    if (this._nsRelease) this._nsRelease();
+    this._nsGeneration = (this._nsGeneration || 0) + 1;
     clearTimeout(this._closeTimer);
     this._trackActive = false;
     if (this._opts && this._opts.onClose) this._opts.onClose();
@@ -929,7 +934,7 @@ class LightDialog {
       state:(available?(on?'On':this.hasLastValues()?'Off · last values':'Off'):'Unavailable')+(this.error?' · '+this.error:this.page==='Effects'&&this.attributes().effect?' · '+this.attributes().effect:''),
       stateColor:this.error?'#f87171':null,accent,value:0,showLevel:false,enabled:true,actions,
       lightBody:this.page?this.choices:this.channels().length?this.body:null,
-      lightDialog:true,onClose:()=>this.close()};
+      owner:this.owner,lightDialog:true,onClose:()=>this.close()};
   }
   buildTracks(channels) {
     this.layout=channels.join(','); this.body.replaceChildren(); this.tracks={};
@@ -1612,6 +1617,7 @@ class NsPanelCoverCard extends NsBaseCard {
   _openSheet() {
     const s = this._stateObj;
     sheet().open({
+      owner: this,
       title: this._title(),
       state: this._stateText(s, Math.round(this._displayValue() * 100)),
       value: this._displayValue(),
@@ -2320,6 +2326,102 @@ const BUTTON_CSS = `
 
 /* What to call for a bare entity, by domain. Anything not listed toggles,
    which is the right answer for lights, switches, fans and input_booleans. */
+/* Local navigation and idle policy. Each swipe owns its clock and dialogs. */
+const nsInteger = (v) => Number.isSafeInteger(v) && v >= 0 ? v : null;
+function nsNavigationTarget(action) {
+  return action && action.action === 'navigate-page' ? nsInteger(action.page) : null;
+}
+function nsNavigationOwner(node) {
+  for (let n = node; n; n = n.parentNode || n.host) {
+    if (n._nsNavigation) return n;
+  }
+  return null;
+}
+class NsIdleNavigation {
+  constructor(go, close, now = () => Date.now()) {
+    this.go = go; this.close = close; this.now = now;
+    this.current = 0; this.count = 0; this.start = 0; this.after = 0;
+    this.overrides = new Map(); this.pointers = new Set();
+    this.scrolling = false; this.visible = true; this.deadline = null;
+    this.pending = null; this.disposed = false; this.timer = null;
+  }
+  configure(cfg) {
+    this.count = cfg.cards.length;
+    this.start = Math.min(cfg.start, Math.max(0, this.count - 1));
+    this.after = nsInteger(cfg.return_to_start_after) || 0;
+    this.overrides.clear();
+    for (const rule of Array.isArray(cfg.return_to_start_overrides) ? cfg.return_to_start_overrides : []) {
+      if (rule && nsInteger(rule.page) !== null && nsInteger(rule.after) !== null) this.overrides.set(rule.page, rule.after);
+    }
+    this.pending = null; this.pointers.clear(); this.scrolling = false;
+    this.activity();
+  }
+  valid(page) { return nsInteger(page) !== null && page < this.count; }
+  get busy() { return this.pointers.size > 0 || this.scrolling; }
+  get seconds() { return this.after ? (this.overrides.has(this.current) ? this.overrides.get(this.current) : this.after) : 0; }
+  activity() {
+    if (this.disposed) return;
+    this.deadline = this.count && this.seconds ? this.now() + this.seconds * 1000 : null;
+    this.arm();
+  }
+  navigate(page, animate = true) {
+    if (this.disposed || !this.valid(page)) return false;
+    if (this.busy) { this.pending = page; return true; }
+    this.close(); this.current = page; this.go(page, animate && this.visible); this.activity(); return true;
+  }
+  pointer(id, down) {
+    if (down) this.pointers.add(id); else this.pointers.delete(id);
+    this.activity(); this.flush();
+  }
+  scroll(active, user = true) {
+    this.scrolling = active;
+    if (user) this.activity();
+    this.flush(); this.arm();
+  }
+  flush() {
+    if (this.busy) return;
+    if (this.pending !== null) { const page = this.pending; this.pending = null; this.navigate(page); }
+    else this.check();
+  }
+  visibility(value) {
+    const resumed = !this.visible && value; this.visible = value;
+    if (!value) { this.pointers.clear(); this.scrolling = false; }
+    if (resumed) this.check(false);
+    this.arm();
+  }
+  check(animate = true) {
+    if (this.disposed || !this.visible || this.busy || this.deadline === null || this.now() < this.deadline) return;
+    this.deadline = null; clearTimeout(this.timer); this.close();
+    if (this.valid(this.start) && this.current !== this.start) { this.current = this.start; this.go(this.start, animate); }
+  }
+  arm() {
+    clearTimeout(this.timer);
+    if (this.disposed || !this.visible || this.busy || this.deadline === null) return;
+    this.timer = setTimeout(() => { this.check(); if (this.deadline !== null) this.arm(); },
+      Math.max(0, Math.min(86400000, this.deadline - this.now())));
+  }
+  dispose() { this.disposed = true; clearTimeout(this.timer); this.pointers.clear(); this.pending = null; }
+}
+function nsOwnDialog(dialog, owner) {
+  if (dialog._nsRelease) dialog._nsRelease();
+  const swipe = nsNavigationOwner(owner);
+  dialog._nsOwner = swipe;
+  if (!swipe) return;
+  swipe._dialogs.add(dialog); swipe._nsNavigation.activity();
+  const input = (event) => {
+    const nav = swipe._nsNavigation;
+    if (event.type === 'pointerdown') nav.pointer(event.pointerId, true);
+    else if (event.type === 'pointerup' || event.type === 'pointercancel' || event.type === 'lostpointercapture') nav.pointer(event.pointerId, false);
+    else nav.activity();
+  };
+  const events = ['pointerdown','pointerup','pointercancel','lostpointercapture','keydown','input','wheel'];
+  events.forEach((type) => dialog.addEventListener(type, input, true));
+  dialog._nsRelease = () => {
+    events.forEach((type) => dialog.removeEventListener(type, input, true));
+    swipe._dialogs.delete(dialog); dialog._nsRelease = null; dialog._nsOwner = null;
+  };
+}
+
 const BUTTON_SERVICE = {
   script: ['script', 'turn_on'],
   scene: ['scene', 'turn_on'],
@@ -2381,7 +2483,7 @@ class NsPanelButtonCard extends NsInfoCard {
       : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon }] : []);
     return list
       .map((it) => (typeof it === 'string' ? { entity: it } : it))
-      .filter((it) => it && (it.entity || it.service))
+      .filter((it) => it && (it.entity || it.service || Object.prototype.hasOwnProperty.call(it, 'tap_action')))
       .slice(0, 6);
   }
 
@@ -2432,6 +2534,13 @@ class NsPanelButtonCard extends NsInfoCard {
   }
 
   _fire(item) {
+    if (Object.prototype.hasOwnProperty.call(item, 'tap_action')) {
+      const page = nsNavigationTarget(item.tap_action);
+      if (page === null) return false;
+      const detail = {page, accepted: false};
+      this.dispatchEvent(new CustomEvent('nspanel-navigate-page', {detail, bubbles: true, composed: true}));
+      return detail.accepted;
+    }
     const parts = item.service ? item.service.split('.') : null;
     const byDomain = item.entity ? BUTTON_SERVICE[item.entity.split('.')[0]] : null;
     const domain = parts ? parts[0] : (byDomain ? byDomain[0] : 'homeassistant');
@@ -2439,6 +2548,7 @@ class NsPanelButtonCard extends NsInfoCard {
     const data = Object.assign({}, item.data || {});
     if (item.entity && !data.entity_id) data.entity_id = item.entity;
     if (this._hass) this._hass.callService(domain, service, data);
+    return true;
   }
 
   _press(b) {
@@ -2461,7 +2571,7 @@ class NsPanelButtonCard extends NsInfoCard {
     b.armed = false;
     b.el.classList.remove('ask');
 
-    this._fire(b.item);
+    if (!this._fire(b.item)) return;
 
     // The acknowledgement. Nothing in the state will confirm this for us.
     b.fired = true;
@@ -2508,7 +2618,7 @@ class NsPanelButtonCard extends NsInfoCard {
       // where you go to find out why the scene did not do what you expected.
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (item.entity && this._config.more_info) moreInfo(this, item.entity);
+        if (!Object.prototype.hasOwnProperty.call(item, 'tap_action') && item.entity && this._config.more_info) moreInfo(this, item.entity);
       });
       pad.appendChild(el);
       return b;
@@ -2522,7 +2632,11 @@ class NsPanelButtonCard extends NsInfoCard {
       // Not isBroken(): that counts `unknown` as broken, which is the normal
       // resting state of a scene or a button that has never been fired. Only a
       // missing or unavailable entity is actually a dead button.
-      const broken = b.item.entity ? (!s || s.state === 'unavailable') : false;
+      const local = Object.prototype.hasOwnProperty.call(b.item, 'tap_action');
+      const page = nsNavigationTarget(b.item.tap_action);
+      const owner = nsNavigationOwner(this);
+      const broken = local ? page === null || !owner || !owner._nsNavigation.valid(page)
+        : b.item.entity ? (!s || s.state === 'unavailable') : false;
 
       b.el.classList.toggle('hot', b.fired || this._lit(b.item));
       if (broken) b.el.setAttribute('disabled', ''); else b.el.removeAttribute('disabled');
@@ -2847,6 +2961,7 @@ class NsPanelAlarmCard extends NsInfoCard {
     if (!this._needsCode(arming)) { this._send(service, null); return; }
     const a = (this._stateObj && this._stateObj.attributes) || {};
     keypad().open({
+      owner: this,
       title: label,
       accent: this._accent(),
       text: a.code_format === 'text',
@@ -3036,6 +3151,9 @@ class NsKeypad extends HTMLElement {
 
   /* opts: {title, hint, accent, text, onSubmit(code) -> Promise<bool>} */
   open(opts) {
+    clearTimeout(this._closeTimer);
+    nsOwnDialog(this, opts.owner);
+    this._nsGeneration = (this._nsGeneration || 0) + 1;
     this._opts = Object.assign({ hint: 'Enter the code', accent: '#8ddba4', text: false }, opts);
     this.style.setProperty('--ns-accent', this._opts.accent);
     this._title.textContent = this._opts.title || '';
@@ -3059,9 +3177,11 @@ class NsKeypad extends HTMLElement {
   }
 
   close() {
+    if (this._nsRelease) this._nsRelease();
+    this._nsGeneration = (this._nsGeneration || 0) + 1;
     this._scrim.classList.remove('in');
     this._wrap.classList.remove('in');
-    setTimeout(() => { if (this.parentNode) this.parentNode.removeChild(this); }, 200);
+    this._closeTimer = setTimeout(() => { if (this.parentNode) this.parentNode.removeChild(this); }, 200);
   }
 
   get _entered() { return this._opts && this._opts.text ? this._input.value : this._code; }
@@ -3093,6 +3213,7 @@ class NsKeypad extends HTMLElement {
   }
 
   _submit() {
+    const generation = this._nsGeneration;
     const code = this._entered;
     if (!code || this._busy) return;
     haptic(this, 'medium');
@@ -3100,8 +3221,10 @@ class NsKeypad extends HTMLElement {
     this._ok.textContent = '\u2026';
     this._draw();
     Promise.resolve(this._opts.onSubmit(code)).then((ok) => {
+      if (generation !== this._nsGeneration) return;
       this._busy = false;
       this._ok.textContent = this._opts.title || 'OK';
+      if (generation !== this._nsGeneration) return;
       if (ok) { this.close(); return; }
       this._code = '';
       this._input.value = '';
@@ -3443,6 +3566,7 @@ class NsPanelClimateCard extends NsBaseCard {
     })).slice(0, 4);
 
     sheet().open({
+      owner: this,
       title: this._title(),
       state: this._stateText(s),
       value: this._displayValue(),
@@ -3747,6 +3871,7 @@ class NsPanelMediaCard extends NsBaseCard {
 
     const lines = this._lines();
     sheet().open({
+      owner: this,
       title: lines.top,
       state: lines.sub,
       value: this._displayValue(),
@@ -4296,6 +4421,11 @@ const EDITOR_LABELS = {
   dots: 'Page dots',
   start: 'Start on page',
   card_spacing: 'Space between pages (px)',
+  tap_action: 'Local tap action',
+  return_to_start_after: 'Return to start after (seconds, 0 disables)',
+  return_to_start_overrides: 'Per-page return times',
+  page: 'Page index (starts at 0)',
+  after: 'Seconds (0 disables on this page)',
   cards: 'Pages (cards)',
   title: 'Title',
   icon: 'Icon',
@@ -4684,6 +4814,10 @@ const BUTTON_SCHEMA = [
       service: { selector: { text: {} } },
       data: { selector: { object: {} } },
       state_entity: { selector: { entity: {} } },
+      tap_action: { selector: { object: { fields: {
+        action: { required: true, selector: { select: { options: ['navigate-page'] } } },
+        page: { required: true, selector: { number: { min: 0, step: 1, mode: 'box' } } },
+      } } } },
       color: { selector: { text: {} } },
       show_name: { selector: { boolean: {} } },
     }, 'name', 'entity'),
@@ -4720,6 +4854,11 @@ const CAMERA_SCHEMA = INFO_SCHEMA.concat([
 ]);
 
 const SWIPE_SCHEMA = [
+  { name: 'return_to_start_after', selector: { number: { min: 0, step: 1, mode: 'box' } } },
+  { name: 'return_to_start_overrides', selector: listOf({
+    page: { required: true, selector: { number: { min: 0, step: 1, mode: 'box' } } },
+    after: { required: true, selector: { number: { min: 0, step: 1, mode: 'box' } } },
+  }, 'page', 'after') },
   {
     name: '', type: 'grid', schema: [
       { name: 'dots', selector: { boolean: {} } },
@@ -4850,8 +4989,7 @@ class NsPanelButtonCardEditor extends NsBaseCardEditor {
   static get entityRequired() { return false; }
   static get rows() { return BUTTON_SCHEMA; }
   static get note() {
-    return 'One entity here is the single-button shorthand. For several buttons use ' +
-      'a `buttons:` list in YAML - the GUI leaves it alone.';
+    return 'Choose an entity, or add buttons with a service or local navigate-page action. Page indices start at 0.';
   }
 }
 
@@ -5121,12 +5259,81 @@ class NsPanelSwipeCard extends HTMLElement {
   static get cardType() { return 'nspanel-swipe-card'; }
   static getConfigElement() { return document.createElement('nspanel-swipe-card-editor'); }
   static getStubConfig() { return { cards: [], dots: true }; }
-  static get defaultOptions() { return { cards: [], dots: true, start: 0, card_spacing: 12 }; }
+  static get defaultOptions() { return { cards: [], dots: true, start: 0, card_spacing: 12, return_to_start_after: 0, return_to_start_overrides: [] }; }
 
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
     this._children = [];
+    this._dialogs = new Set();
+    this._external = new Set();
+    this._nsNavigation = new NsIdleNavigation((page, animate) => this._go(page, animate), () => this._closeDialogs());
+    this._input = (event) => {
+      if (nsNavigationOwner(event.composedPath()[0]) !== this) return;
+      const nav = this._nsNavigation;
+      if (event.type === 'pointerdown') { this._programmatic = false; nav.pointer(event.pointerId, true); }
+      else if (['pointerup','pointercancel','lostpointercapture'].includes(event.type)) nav.pointer(event.pointerId, false);
+      else { this._programmatic = false; nav.activity(); }
+    };
+    this._releasePointer = (event) => {
+      if (this._nsNavigation.pointers.has(event.pointerId)) this._nsNavigation.pointer(event.pointerId, false);
+    };
+    this._visibility = () => this._nsNavigation.visibility(!document.hidden && this._intersecting !== false && !this._external.size);
+    this._externalOpen = (event) => {
+      if (event.type === 'hass-more-info' && event.detail && event.detail.entityId) this._external.add('ha-more-info-dialog');
+      if (event.type === 'show-dialog' && event.detail && event.detail.dialogTag) this._external.add(event.detail.dialogTag);
+      this._visibility();
+    };
+    this._externalClose = (event) => {
+      this._external.delete(event.detail && event.detail.dialog);
+      if (!this._external.size) this._nsNavigation.activity();
+      this._visibility();
+    };
+    this.addEventListener('nspanel-navigate-page', (event) => {
+      if (nsNavigationOwner(event.composedPath()[0]) !== this) return;
+      event.stopPropagation();
+      event.detail.accepted = this._nsNavigation.navigate(event.detail.page);
+    });
+  }
+
+  connectedCallback() {
+    this._nsNavigation.disposed = false;
+    for (const type of ['pointerdown','pointerup','pointercancel','lostpointercapture','keydown','wheel']) this.addEventListener(type, this._input, true);
+    document.addEventListener('visibilitychange', this._visibility);
+    window.addEventListener('pointerup', this._releasePointer, true);
+    window.addEventListener('pointercancel', this._releasePointer, true);
+    window.addEventListener('hass-more-info', this._externalOpen, true);
+    window.addEventListener('show-dialog', this._externalOpen, true);
+    window.addEventListener('dialog-closed', this._externalClose, true);
+    this._observer = new IntersectionObserver((entries) => { this._intersecting = entries[0].isIntersecting; this._visibility(); });
+    this._observer.observe(this);
+    this._resize = new ResizeObserver(() => { if (!this._nsNavigation.busy) this._go(this._nsNavigation.current, false); });
+    this._resize.observe(this);
+    this._visibility();
+    if (this._config) this._build();
+  }
+
+  disconnectedCallback() {
+    this._closeDialogs(); this._nsNavigation.dispose();
+    clearTimeout(this._scrollTimer); cancelAnimationFrame(this._scrollFrame);
+    this._observer?.disconnect(); this._resize?.disconnect();
+    for (const type of ['pointerdown','pointerup','pointercancel','lostpointercapture','keydown','wheel']) this.removeEventListener(type, this._input, true);
+    document.removeEventListener('visibilitychange', this._visibility);
+    window.removeEventListener('pointerup', this._releasePointer, true);
+    window.removeEventListener('pointercancel', this._releasePointer, true);
+    window.removeEventListener('hass-more-info', this._externalOpen, true);
+    window.removeEventListener('show-dialog', this._externalOpen, true);
+    window.removeEventListener('dialog-closed', this._externalClose, true);
+    this._external.clear(); this._buildGeneration = (this._buildGeneration || 0) + 1;
+  }
+
+  _closeDialogs() { for (const dialog of [...this._dialogs]) dialog.close(); }
+  _go(page, animate) {
+    const swipe = this.shadowRoot.querySelector('.swipe');
+    if (!swipe || !this._nsNavigation.valid(page)) return;
+    this._programmatic = true;
+    swipe.scrollTo({left: page * (swipe.clientWidth + this._config.card_spacing), behavior: animate ? 'smooth' : 'auto'});
+    this._mark?.(page);
   }
 
   setConfig(config) {
@@ -5136,10 +5343,16 @@ class NsPanelSwipeCard extends HTMLElement {
     const c = Object.assign({}, NsPanelSwipeCard.defaultOptions, config || {});
     if (!Array.isArray(c.cards)) c.cards = [];
     // simple-swipe-card's spelling, so a dashboard moves over by changing one word
-    if (config.show_pagination === false) c.dots = false;
+    if (config && config.show_pagination === false) c.dots = false;
     c.start = Math.max(0, Math.round(Number(c.start) || 0));
     c.card_spacing = Math.max(0, Number(c.card_spacing) || 0);
+    if (JSON.stringify(this._config) === JSON.stringify(c)) return;
+    const first = !this._config || !this._config.cards.length;
+    this._closeDialogs();
     this._config = c;
+    this._nsNavigation.configure(c);
+    if (first || !this._nsNavigation.valid(this._nsNavigation.current)) this._nsNavigation.current = this._nsNavigation.start;
+    this._nsNavigation.activity();
     this._build();
   }
 
@@ -5173,6 +5386,8 @@ class NsPanelSwipeCard extends HTMLElement {
   }
 
   async _build() {
+    const generation = this._buildGeneration = (this._buildGeneration || 0) + 1;
+    clearTimeout(this._scrollTimer); cancelAnimationFrame(this._scrollFrame);
     const cfg = this._config;
     const show = cfg.dots && cfg.cards.length > 1;
     this.shadowRoot.innerHTML = `
@@ -5185,7 +5400,7 @@ class NsPanelSwipeCard extends HTMLElement {
     const swipe = this.shadowRoot.querySelector('.swipe');
     const dots = this.shadowRoot.querySelector('.dots');
     const helpers = window.loadCardHelpers ? await window.loadCardHelpers() : null;
-    if (this._config !== cfg) return; // reconfigured while the helpers loaded
+    if (this._config !== cfg || generation !== this._buildGeneration) return; // reconfigured while the helpers loaded
     this._children = cfg.cards.map((child) => {
       const page = document.createElement('div');
       page.className = 'page';
@@ -5214,21 +5429,25 @@ class NsPanelSwipeCard extends HTMLElement {
       for (let n = 0; n < all.length; n++) all[n].classList.toggle('on', n === i);
     };
     const stride = () => (swipe.clientWidth || 1) + cfg.card_spacing;
-    let queued = false;
+    this._mark = mark;
     swipe.addEventListener('scroll', () => {
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        mark(Math.round(swipe.scrollLeft / stride()));
-      });
+      const nav = this._nsNavigation;
+      nav.scroll(true, !this._programmatic);
+      clearTimeout(this._scrollTimer);
+      this._scrollTimer = setTimeout(() => {
+        if (generation !== this._buildGeneration) return;
+        nav.current = Math.max(0, Math.min(nav.count - 1, Math.round(swipe.scrollLeft / stride())));
+        mark(nav.current);
+        nav.scroll(false, !this._programmatic);
+        this._programmatic = false;
+      }, 120);
+      cancelAnimationFrame(this._scrollFrame);
+      this._scrollFrame = requestAnimationFrame(() => mark(Math.round(swipe.scrollLeft / stride())));
     }, { passive: true });
-    mark(0);
-    if (cfg.start > 0) {
-      requestAnimationFrame(() => {
-        swipe.scrollLeft = Math.min(cfg.start, cfg.cards.length - 1) * stride();
-      });
-    }
+    mark(this._nsNavigation.current);
+    this._scrollFrame = requestAnimationFrame(() => {
+      if (generation === this._buildGeneration) this._go(this._nsNavigation.current, false);
+    });
   }
 }
 

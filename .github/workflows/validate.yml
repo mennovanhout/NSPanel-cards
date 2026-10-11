@@ -31,3 +31,6 @@ jobs:
         run: python3 dev/check-light-tests.py
       - name: Switch detail target regressions
         run: python3 dev/check-switch-tests.py
+
+      - name: Navigation and idle return regressions
+        run: python3 dev/check-navigation-tests.py
