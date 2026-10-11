@@ -279,8 +279,11 @@ async function run() {
 
   await test('last values are confirmed state only; off details and tiles stay separate',async()=>{
     const d=await details({effect_favorites:favorites});
+    const onColor=getComputedStyle(sheet()._actions.lastChild).backgroundColor;
+    assert(onColor!=='rgb(255, 183, 74)','HS power still amber');
     setState(colorState('off',{brightness:null,hs_color:null,rgb_color:null,color_mode:null,color_temp_kelvin:null,effect:null}));await pause();
     assert(d.values().brightness===128/255&&d.values().hue===.5,'last levels missing');
+    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===onColor,'off power lost remembered hue');
     assert(sheet()._state.textContent==='Off · last values','history label missing');
     assert(!card._card.classList.contains('on')&&card._card.style.getPropertyValue('--ns-fill')==='0','off tile appears on');
     d.browse('Effects');const selected=d.choices.children[0];assert(selected.classList.contains('selected')&&!selected.disabled,'last effect cannot be used to switch on');
@@ -299,10 +302,20 @@ async function run() {
   });
   await test('last temperature mode survives missing off attributes and capabilities remain live',async()=>{
     const d=await details({},colorState('on',{color_mode:'color_temp',color_temp_kelvin:4000}));
+    const warm=getComputedStyle(sheet()._actions.lastChild).backgroundColor;
+    assert(warm!=='rgb(255, 183, 74)','TW power still amber');
     setState(colorState('off',{brightness:null,hs_color:null,color_mode:null,color_temp_kelvin:null}));await pause();
     assert(d.channels()[0]==='temperature'&&Math.abs(d.values().temperature-2000/4500)<.00001,'temperature mode lost');
+    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===warm,'off power lost remembered white');
     setState(state(['onoff'],'off',{brightness:null}));await pause();assert(d.channels().length===0,'cached capabilities resurrected');
     setState(state(['rgb'],'unavailable'));await pause();assert(!d.available(),'history hides unavailable');
+  });
+  await test('power preview respects explicit accent and follow_color false',async()=>{
+    for(const [config,expected] of [[{accent:'#12abcd'},'rgb(18, 171, 205)'],[{follow_color:false},'rgb(255, 183, 74)']]) {
+      await details(config,colorState('off'));
+      assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===expected,'configured accent ignored');
+      assert(calls.length===0,'preview sent command');
+    }
   });
   await test('light memory storage restart, batching, origin isolation and corruption',()=>{
     const data=new Map(),storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};
