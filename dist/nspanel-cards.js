@@ -483,6 +483,11 @@ class NsSheet extends HTMLElement {
     this._tfill = this.shadowRoot.querySelector('.tfill');
     this._tval = this.shadowRoot.querySelector('.tval');
     this._actions = this.shadowRoot.querySelector('.actions');
+    this._body = this.shadowRoot.querySelector('.body');
+    this._binaryState = document.createElement('div');
+    this._binaryState.style.cssText = 'flex:1;display:none;align-items:center;justify-content:center;font-size:36px;font-weight:700';
+    this._body.after(this._binaryState);
+    this._trackActive = false;
 
     this.shadowRoot.querySelector('.x').addEventListener('click', () => this.close());
     this._scrim.addEventListener('click', () => this.close());
@@ -497,27 +502,10 @@ class NsSheet extends HTMLElement {
   /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
             actions:[{label, icon, primary, run}] } */
   open(opts) {
-    this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a' }, opts);
-    this.style.setProperty('--ns-accent', this._opts.accent);
-    this._title.textContent = opts.title || '';
-    this._state.textContent = opts.state || '';
-    this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
-    this.setValue(opts.value);
-
-    this._actions.innerHTML = '';
-    (opts.actions || []).forEach((a) => {
-      const b = document.createElement('button');
-      b.className = 'act' + (a.primary ? ' primary' : '');
-      b.innerHTML = (a.icon ? `<ha-icon icon="${a.icon}"></ha-icon>` : '') +
-        `<span>${a.label}</span>`;
-      b.addEventListener('click', () => {
-        haptic(this, 'light');
-        a.run();
-        if (a.close !== false) this.close();
-      });
-      this._actions.appendChild(b);
-    });
-    this._actions.style.display = (opts.actions && opts.actions.length) ? '' : 'none';
+    clearTimeout(this._closeTimer);
+    if (this._opts && this._opts.onClose) this._opts.onClose();
+    this._trackActive = false;
+    this.update(opts);
 
     const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
     if (this.parentNode !== host) {
@@ -531,6 +519,49 @@ class NsSheet extends HTMLElement {
     });
   }
 
+  update(opts) {
+    this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a',
+      showLevel: true, enabled: true }, opts);
+    this.style.setProperty('--ns-accent', this._opts.accent);
+    this._title.textContent = opts.title || '';
+    this._state.textContent = opts.state || '';
+    this._binaryState.textContent = opts.state || '';
+    this._body.style.display = this._opts.showLevel ? '' : 'none';
+    this._binaryState.style.display = this._opts.showLevel ? 'none' : 'flex';
+    this._body.style.opacity = this._opts.enabled ? '' : '.45';
+    this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
+    if (!this._opts.enabled || !this._opts.showLevel) {
+      this._trackActive = false;
+      this._track.classList.remove('dragging');
+    }
+    this._body.querySelectorAll('.step').forEach((b) => { b.disabled = !this._opts.enabled; });
+    if (!this._trackActive) this.setValue(opts.value);
+    const actions = opts.actions || [];
+    while (this._actions.children.length > actions.length) this._actions.lastChild.remove();
+    actions.forEach((a, i) => {
+      let b = this._actions.children[i];
+      if (!b) {
+        b = document.createElement('button');
+        b.append(document.createElement('ha-icon'), document.createElement('span'));
+        b.addEventListener('click', () => {
+          const current = this._opts.actions[i];
+          if (!this._opts.enabled || current.enabled === false) return;
+          haptic(this, 'light');
+          current.run();
+          if (current.close !== false) this.close();
+        });
+        this._actions.appendChild(b);
+      }
+      b.className = 'act' + (a.primary ? ' primary' : '');
+      b.disabled = !this._opts.enabled || a.enabled === false;
+      b.style.opacity = b.disabled ? '.35' : '';
+      b.firstChild.setAttribute('icon', a.icon || '');
+      b.firstChild.style.display = a.icon ? '' : 'none';
+      b.lastChild.textContent = a.label;
+    });
+    this._actions.style.display = actions.length ? '' : 'none';
+  }
+
   setValue(v) {
     this._value = clamp(v, 0, 1);
     this.style.setProperty('--ns-fill', String(this._value));
@@ -538,13 +569,17 @@ class NsSheet extends HTMLElement {
   }
 
   close() {
+    clearTimeout(this._closeTimer);
+    this._trackActive = false;
+    if (this._opts && this._opts.onClose) this._opts.onClose();
     this._scrim.classList.remove('in');
     this._wrap.classList.remove('in');
     const done = () => { if (this.parentNode) this.parentNode.removeChild(this); };
-    setTimeout(done, 200);
+    this._closeTimer = setTimeout(done, 200);
   }
 
   _step(delta) {
+    if (!this._opts.enabled || !this._opts.showLevel) return;
     haptic(this, 'light');
     const v = clamp(this._value + delta / 100, 0, 1);
     this.setValue(v);
@@ -554,7 +589,6 @@ class NsSheet extends HTMLElement {
 
   _bindTrack() {
     const t = this._track;
-    let active = false;
 
     // the sheet's track is absolute: touch position IS the value. It is a
     // dedicated full-height surface, so there is nothing to be precise about.
@@ -566,7 +600,8 @@ class NsSheet extends HTMLElement {
     };
 
     t.addEventListener('pointerdown', (e) => {
-      active = true;
+      if (!this._opts.enabled || !this._opts.showLevel) return;
+      this._trackActive = true;
       t.setPointerCapture(e.pointerId);
       t.classList.add('dragging');
       const v = valueAt(e.clientY);
@@ -575,19 +610,22 @@ class NsSheet extends HTMLElement {
       haptic(this, 'selection');
     });
     t.addEventListener('pointermove', (e) => {
-      if (!active) return;
+      if (!this._trackActive) return;
       const v = valueAt(e.clientY);
       this.setValue(v);
       if (this._opts.onInput) this._opts.onInput(v);
     });
     const end = () => {
-      if (!active) return;
-      active = false;
+      if (!this._trackActive) return;
+      this._trackActive = false;
       t.classList.remove('dragging');
       if (this._opts.onCommit) this._opts.onCommit(this._value);
     };
     t.addEventListener('pointerup', end);
-    t.addEventListener('pointercancel', end);
+    t.addEventListener('pointercancel', () => {
+      this._trackActive = false;
+      t.classList.remove('dragging');
+    });
   }
 }
 customElements.define('ns-sheet', NsSheet);
@@ -596,6 +634,33 @@ let _sheet = null;
 function sheet() {
   if (!_sheet) _sheet = document.createElement('ns-sheet');
   return _sheet;
+}
+
+/* HA omits current brightness while a light is off. Supported modes are
+   the capability contract; a running on/off effect may restrict it further. */
+function lightCapabilities(s) {
+  const attrs = s && s.attributes || {};
+  const modes = Array.isArray(attrs.supported_color_modes) ? attrs.supported_color_modes : [];
+  const brightness = !(isOn(s) && attrs.color_mode === 'onoff') &&
+    !modes.includes('onoff') &&
+    modes.some((m) => ['brightness', 'color_temp', 'hs', 'xy', 'rgb', 'rgbw', 'rgbww', 'white'].includes(m));
+  const color = brightness && modes.some((m) => ['hs', 'xy', 'rgb', 'rgbw', 'rgbww'].includes(m));
+  return { available: !isBroken(s), brightness, color,
+    temperature: brightness && (modes.includes('color_temp') || color) };
+}
+
+function lightPresetAllowed(s, p) {
+  const c = lightCapabilities(s);
+  if (!c.available) return false;
+  if (p.scene != null || p.brightness_pct === 0) return true;
+  if (p.brightness_pct !== undefined && !c.brightness) return false;
+  if (p.rgb_color !== undefined && !c.color) return false;
+  if (p.color_temp_kelvin !== undefined && !c.temperature) return false;
+  if (p.effect !== undefined) {
+    const a = s.attributes || {};
+    if (!(a.supported_features & 4) || !Array.isArray(a.effect_list) || !a.effect_list.includes(p.effect)) return false;
+  }
+  return true;
 }
 
 /* ================================================================== *
@@ -626,6 +691,7 @@ class NsBaseCard extends HTMLElement {
         `this card takes ${this.constructor.domain}.*`
       );
     }
+    this._explicitPresets = Array.isArray(config.presets);
     this._config = Object.assign({
       title: null,
       name: null,            // the original spelling of title; still honoured
@@ -770,6 +836,8 @@ class NsBaseCard extends HTMLElement {
     }
   }
 
+  _canDrag() { return true; }
+
   _onMove(e) {
     const p = this._p;
     if (!p || e.pointerId !== p.id || p.consumed) return;
@@ -784,6 +852,11 @@ class NsBaseCard extends HTMLElement {
       // in a swipe card, so we let go of it entirely rather than fighting for it.
       if (this._config.swipe_safe && adx >= ady) {
         p.axis = 'x';
+        this._cancelPress();
+        return;
+      }
+      if (!this._canDrag()) {
+        p.consumed = true;
         this._cancelPress();
         return;
       }
@@ -867,6 +940,17 @@ class NsPanelLightCard extends NsBaseCard {
       { name: 'Mid', brightness_pct: 50 },
       { name: 'Full', brightness_pct: 100 },
     ];
+  }
+
+  _canDrag() { return lightCapabilities(this._stateObj).brightness; }
+
+  _presets() {
+    return this._explicitPresets || this._canDrag() ? this._config.presets : [];
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._sheetOpen) sheet().close();
   }
 
   _entityValue() {
@@ -970,6 +1054,7 @@ class NsPanelLightCard extends NsBaseCard {
   }
 
   _applyPreset(p) {
+    if (!lightPresetAllowed(this._stateObj, p)) return;
     const data = {};
     if (p.brightness_pct !== undefined) data.brightness_pct = p.brightness_pct;
     if (p.color_temp_kelvin !== undefined) data.color_temp_kelvin = p.color_temp_kelvin;
@@ -986,30 +1071,43 @@ class NsPanelLightCard extends NsBaseCard {
     this._call('light', 'turn_on', data);
   }
 
-  _onTap() { this._call('light', 'toggle'); }
+  _onTap() { if (!isBroken(this._stateObj)) this._call('light', 'toggle'); }
 
   _commit(v) {
+    if (isBroken(this._stateObj) || !this._canDrag()) return;
     const pct = Math.round(v * 100);
     if (pct <= 0) this._call('light', 'turn_off');
     else this._call('light', 'turn_on', { brightness_pct: pct });
   }
 
   _openSheet() {
+    if (isBroken(this._stateObj)) return;
+    sheet().open(this._sheetOptions());
+    this._sheetOpen = true;
+  }
+
+  _sheetOptions() {
     const s = this._stateObj;
-    const acts = (this._config.presets || []).slice(0, 3).map((p) => ({
+    const acts = this._presets().slice(0, 3).map((p) => ({
       label: p.name || `${p.brightness_pct}%`,
       icon: p.icon || 'mdi:lightbulb-on-outline',
+      enabled: lightPresetAllowed(s, p),
       run: () => this._applyPreset(p),
     }));
     acts.push({
       label: isOn(s) ? 'Turn off' : 'Turn on',
       icon: isOn(s) ? 'mdi:lightbulb-off' : 'mdi:lightbulb-on',
       primary: true,
-      run: () => this._call('light', 'toggle'),
+      run: () => {
+        if (!isBroken(this._stateObj)) this._call('light', isOn(s) ? 'turn_off' : 'turn_on');
+      },
     });
-    sheet().open({
+    return {
       title: this._title(),
-      state: isOn(s) ? 'On' : 'Off',
+      state: isBroken(s) ? 'Unavailable' : (isOn(s) ? 'On' : 'Off'),
+      showLevel: this._canDrag(),
+      enabled: !isBroken(s),
+      onClose: () => { this._sheetOpen = false; },
       value: this._displayValue(),
       accent: this._liveAccent(),
       step: this._config.step,
@@ -1020,7 +1118,7 @@ class NsPanelLightCard extends NsBaseCard {
         this._scheduleRender();
       },
       onCommit: (v) => this._commit(v),
-    });
+    };
   }
 
   _render() {
@@ -1029,7 +1127,9 @@ class NsPanelLightCard extends NsBaseCard {
     const s = this._stateObj;
     const broken = isBroken(s);
     const on = isOn(s);
-    const v = this._displayValue();
+    const dimmable = this._canDrag();
+    if (!dimmable || broken) { this._local = null; this._localUntil = 0; }
+    const v = dimmable ? this._displayValue() : (on ? 1 : 0);
     const pct = Math.round(v * 100);
 
     this._card.classList.toggle('unavailable', broken);
@@ -1044,12 +1144,16 @@ class NsPanelLightCard extends NsBaseCard {
       cfg.icon || (s && s.attributes.icon) || (on ? 'mdi:lightbulb-on' : 'mdi:lightbulb-outline'));
     this._elName.textContent = this._title();
 
-    if (this._valueShown !== pct || this._onShown !== on) {
-      this._valueShown = pct;
-      this._onShown = on;
-      this._elValue.innerHTML = on ? `${pct}<small>%</small>` : '';
-      this._elSub.textContent = broken ? 'Unavailable' : (on ? `On · ${pct}%` : 'Off');
-    }
+    this._elValue.style.display = dimmable && on ? '' : 'none';
+    const label = dimmable && on ? `${pct}` : '';
+    if (this._elValue.firstChild.nodeType === Node.TEXT_NODE) this._elValue.firstChild.textContent = label;
+    this._elSub.textContent = broken ? 'Unavailable' : (on ? (dimmable ? `On · ${pct}%` : 'On') : 'Off');
+    this._elPresets.style.display = cfg.show_presets && this._presets().length ? '' : 'none';
+    Array.from(this._elPresets.children).forEach((button, i) => {
+      button.disabled = !lightPresetAllowed(s, cfg.presets[i]);
+      button.style.opacity = button.disabled ? '.35' : '';
+    });
+    if (this._sheetOpen) sheet().update(this._sheetOptions());
   }
 }
 

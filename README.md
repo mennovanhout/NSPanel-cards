@@ -157,6 +157,25 @@ presets:
 That is the card at the top of the picture; below it is a second one with
 `show_presets: false` and `height: 184`.
 
+#### On/off lights
+
+The same card also renders relay lights. It reads HA's `supported_color_modes`:
+on/off lights show their state without percentages, a brightness drag or the default
+brightness presets. Long-press opens a state and on/off dialog. No extra YAML is needed.
+Dimmable lights keep their controls when switched off, even if HA omits current brightness.
+Missing, empty or unrecognized mode information falls back to on/off controls; an active
+`color_mode: onoff` effect temporarily disables brightness and color adjustments.
+
+Explicit presets stay visible but are disabled when they request unsupported capabilities;
+they are never silently converted to a different action. Scenes remain available and
+`brightness_pct: 0` still means off. Effect presets require the effect in HA's `effect_list`
+and the effect capability. Unavailable entities disable all actions, including open-dialog
+controls. The dialog follows external state and capability changes. Opening, dismissing or
+cancelling a gesture sends no command.
+
+<img src="docs/images/light-onoff.png" alt="An on/off light without a percentage or brightness presets" width="240">
+<img src="docs/images/light-onoff-sheet.png" alt="The on/off detail dialog without a brightness slider" width="240">
+
 #### The card takes the light's colour
 
 The fill is the bulb's own colour, not a fixed accent. The top card in the picture is a 2700K
@@ -1002,3 +1021,13 @@ card is not what is holding your dashboard back.
 ## Licence
 
 MIT
+
+### Light regression tests
+
+Run `python3 dev/check-light-tests.py` with Chromium or Google Chrome installed (or pass
+`--browser /path/to/chromium`). The dependency-free bench uses fake HA states and records
+service calls without contacting a house. It covers capabilities, gestures, live dialogs,
+presets and the shared slider defaults; CI runs it alongside the syntax check.
+`dev/light-capabilities.json` mirrors the native app's capability fixtures. For visual
+inspection, run `python3 dev/serve.py` and open `/dev/light-tests.html?preview=sheet`
+(or `preview=onoff` / `preview=dimmer`).
