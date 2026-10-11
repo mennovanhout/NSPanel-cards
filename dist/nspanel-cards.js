@@ -2465,11 +2465,12 @@ class NsPanelButtonCard extends NsInfoCard {
     return { entity: found || 'script.example', height: 140 };
   }
 
-  connectedCallback() { super.connectedCallback(); this._scheduleRender(); }
+  connectedCallback() { super.connectedCallback(); this._render(); }
 
   setConfig(config) {
     super.setConfig(config);
-    this._scheduleRender();
+    // Initial labels and availability do not depend on HA or a future frame.
+    this._render();
     if (!this._items.length) {
       throw new Error(
         `${this.constructor.cardType}: needs an "entity", or "buttons" with at least one`);

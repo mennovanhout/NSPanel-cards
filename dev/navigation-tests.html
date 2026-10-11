@@ -97,9 +97,14 @@ async function run(){
   assert(ed._config.return_to_start_after===15&&ed._config.return_to_start_overrides[0].after===60,'editor dropped idle options');
   const be=NsPanelButtonCard.getConfigElement();be.setConfig(button(3));be._valueChanged({stopPropagation(){},detail:{value:{height:140}}});assert(be._config.buttons[0].tap_action.page===3,'editor dropped action');
  });
- await test('navigation row hit targets exceed 56px at 480px; no horizontal overflow',async()=>{
+ await test('navigation row hit targets exceed 56px in Pro 86 and Pro 120 orientations',async()=>{
   const c=config();c.cards[2]={...button(1),columns:3,buttons:[...button(1,'Licht').buttons,...button(3,'Rollläden').buttons,...button(4,'Klima').buttons]};
-  const s=await mount(c);const row=s._children[2];for(const b of row.shadowRoot.querySelectorAll('button')){const r=b.getBoundingClientRect();assert(r.width>=56&&r.height>=56,'small target');}assert(row.scrollWidth<=480,'overflow');
+  const s=await mount(c);const row=s._children[2];
+  for(const [width,height] of [[480,480],[500,889],[889,500]]) {
+   s.parentNode.style.width=width+'px';s.parentNode.style.height=height+'px';await pause(200);
+   for(const b of row.shadowRoot.querySelectorAll('button')){const r=b.getBoundingClientRect();assert(r.width>=56&&r.height>=56,'small target at '+width+'x'+height);}
+   assert(row.scrollWidth<=width,'overflow at '+width+'x'+height);
+  }
  });
  fixture.replaceChildren();await pause(250);
  document.querySelector('#result').textContent=JSON.stringify(results,null,2);document.documentElement.dataset.testStatus=results.every(r=>r.passed)?'passed':'failed';
