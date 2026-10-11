@@ -157,6 +157,25 @@ presets:
 That is the card at the top of the picture; below it is a second one with
 `show_presets: false` and `height: 184`.
 
+#### On/off lights
+
+The same card also renders relay lights. It reads HA's `supported_color_modes`:
+on/off lights show their state without percentages, a brightness drag or the default
+brightness presets. Long-press opens a state and on/off dialog. No extra YAML is needed.
+Dimmable lights keep their controls when switched off, even if HA omits current brightness.
+Missing, empty or unrecognized mode information falls back to on/off controls; an active
+`color_mode: onoff` effect temporarily disables brightness and color adjustments.
+
+Explicit presets stay visible but are disabled when they request unsupported capabilities;
+they are never silently converted to a different action. Scenes remain available and
+`brightness_pct: 0` still means off. Effect presets require the effect in HA's `effect_list`
+and the effect capability. Unavailable entities disable all actions, including open-dialog
+controls. The dialog follows external state and capability changes. Opening, dismissing or
+cancelling a gesture sends no command.
+
+<img src="docs/images/light-onoff.png" alt="An on/off light without a percentage or brightness presets" width="240">
+<img src="docs/images/light-onoff-sheet.png" alt="The on/off detail dialog without a brightness slider" width="240">
+
 #### The card takes the light's colour
 
 The fill is the bulb's own colour, not a fixed accent. The top card in the picture is a 2700K
@@ -497,7 +516,26 @@ greyed out and says so. A long-press opens more-info.
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
-Per switch: `entity`, `name`, `icon`, `show_name`, `show_state`.
+Per switch: `entity`, `detail_entity`, `name`, `icon`, `show_name`, `show_state`.
+`detail_entity` optionally selects a different entity for long-press more-info;
+it is also accepted beside `entity` in the single-switch shorthand. A short tap,
+tile state and availability still use `entity`. Without a non-empty string target,
+details use `entity` as before. `more_info: false` disables details for either target.
+No entity relationship is inferred. The native app opens its matching detail sheet;
+the browser opens Home Assistant more-info. Older bundles ignore this option.
+
+```yaml
+type: custom:nspanel-switch-card
+switches:
+  - entity: switch.extractor_power
+    detail_entity: fan.extractor
+    name: Extractor
+    icon: mdi:fan
+```
+
+Run `python3 dev/check-switch-tests.py --browser /path/to/chromium` to verify
+target routing, unchanged tap commands, fallback values, configuration updates
+and editor support with fake HA.
 
 ### Camera
 
@@ -1002,3 +1040,111 @@ card is not what is holding your dashboard back.
 ## Licence
 
 MIT
+
+### Light regression tests
+
+Run `python3 dev/check-light-tests.py` with Chromium or Google Chrome installed (or pass
+`--browser /path/to/chromium`). The dependency-free bench uses fake HA states and records
+service calls without contacting a house. It covers capabilities, gestures, live dialogs,
+presets and the shared slider defaults; CI runs it alongside the syntax check.
+`dev/light-capabilities.json` mirrors the native app's capability fixtures. For visual
+inspection, run `python3 dev/serve.py` and open `/dev/light-tests.html?preview=sheet`
+(or `preview=onoff` / `preview=dimmer`).
+
+
+## Light colour controls
+
+Long-press a light card or a switch tile whose `detail_entity` is a light to open
+its shared light dialog. Dimmable, tunable-white and colour lights use the same
+layout: tall unlabelled tracks, brightness on the right, then large +/− buttons.
+Horizontal shadow markers show positions. Only brightness shows a percentage; temperature
+and hue/saturation remain available to accessibility tools without visible scales.
+The brightness fill previews the target colour, including remembered values while
+off. The power button is neutral while off and uses a readable tint of the target
+colour while on. An explicit `accent` still wins for the on-state action;
+`follow_color: false` retains its default accent. Card colours and effect selection
+accents keep their existing behaviour.
+
+```yaml
+type: custom:nspanel-light-card
+entity: light.wled
+step_target: last_used  # brightness (default) or last_used
+step: 5
+effect_favorites:
+  - effect: Solid
+    name: Static
+    icon: mdi:lightbulb-outline
+  - effect: Rainbow
+    name: Rainbow
+```
+
+`step_target: brightness` always adjusts brightness. With `last_used`, +/− starts
+with brightness each time the dialog opens, then follows the last completed
+slider interaction. Its thicker position marker identifies that slider. Cancelled
+gestures and external HA updates do not select a target. Returning from presets
+or effects preserves it; changing colour mode or losing a capability resets to
+brightness. `step` is a percentage of the channel range (default 5: brightness /
+saturation 5 points, hue 18 degrees, temperature 5% of its Kelvin range). Hue wraps.
+
+Both fields and `effect_favorites` also work on switch cards and individual switch
+items; an item overrides its card. `detail_entity` selects the light for details
+while short taps still operate `entity`. The web editors expose these options.
+
+Effects open a separate scrollable two-column chooser in configured order.
+`effect` must exactly match an HA `effect_list` entry; `name` and `icon` are
+optional. Unsupported favourites stay visible but disabled; the current effect
+has a check mark. Without favourites there is no Effects action. Existing presets
+and scenes remain available on their own subpage. Back and Close never send a
+command. Successful power, preset and effect commands close the dialog.
+
+HA capabilities determine which tracks appear. Temperature requires valid Kelvin
+bounds (legacy mired bounds are converted); absent/invalid bounds hide that track.
+RGB, RGBW, RGBWW, HS and XY lights accept `hs_color` through HA's conversion;
+RGBWW may also expose temperature with valid bounds. An active brightness-only
+effect temporarily hides colour tracks. Merely opening or changing UI mode never
+changes the light. Off lights retain supported controls.
+
+Dragging previews locally and releasing sends one command with the changed
+property only: `brightness_pct`, `color_temp_kelvin` or `hs_color`. Zero brightness
+sends `light.turn_off`. Colour and effects can turn an off light on without sending
+zero brightness. Pending requests lock device controls; rejection or a 10-second
+timeout restores confirmed state and leaves an error visible, without automatic
+retry. A timeout cannot prove whether the device eventually applied the command.
+
+Contract reference: [HA light entity](https://developers.home-assistant.io/docs/core/entity/light/)
+and [light actions](https://www.home-assistant.io/integrations/light/).
+
+### Last confirmed light values
+
+Light details remember confirmed on-state brightness, colour mode, HS/RGB colour,
+colour temperature and effect locally. When a light is off, valid HA attributes
+take precedence and missing values fall back to this memory. The status reads
+`Off · last values`; dashboard tiles still show the actual off state. Unavailable
+entities and capabilities always come from live HA state. The remembered effect
+can be selected again while off to turn the light on. The plain power action
+still sends only `turn_on`; it never reapplies a saved snapshot.
+
+The cache is scoped to the HA origin, limited to 128 lights and survives restarts.
+Only confirmed HA on-state messages update it; drafts, service acknowledgements,
+failed commands and zero/null off attributes do not. Writes are batched for two
+seconds and flushed when an off update arrives. Storage failure falls back to
+session memory. Each client remembers what it has observed itself; changes while
+it was absent cannot be recovered from missing off attributes. No history API,
+background polling, new dependency or HA helper is required.
+
+### Preview
+
+Actual browser captures at 480×480 using simulated lights. No Home Assistant
+connection is needed: run `python3 dev/serve.py` and open
+`dev/light-preview.html?mode=rgb` (`dimmer` and `tw` are also available).
+
+| Dimmer | Tunable white | RGB / last-used slider |
+| --- | --- | --- |
+| ![Dimmer with a 50% brightness fill](docs/images/light-controls/dimmer.png) | ![Tunable-white gradient and matching brightness fill](docs/images/light-controls/tw.png) | ![RGB sliders with the hue slider selected for plus/minus](docs/images/light-controls/rgb.png) |
+
+| Effect favourites | Last values while off |
+| --- | --- |
+| ![Rainbow selected in the effect chooser](docs/images/light-controls/effects.png) | ![RGB details showing Off · last values after a browser reload](docs/images/light-controls/last-values.png) |
+
+With `last_used`, plus/minus starts on brightness each time the dialog opens,
+then follows the last completed slider interaction.

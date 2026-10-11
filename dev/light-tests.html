@@ -1,0 +1,359 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Light capability regression tests</title>
+<style>body{margin:0;background:#0b0d10;color:white;font:16px sans-serif}#fixture{width:480px}#result{white-space:pre-wrap}button:disabled{cursor:default}</style>
+<div id="fixture"></div><pre id="result">Running</pre>
+<script src="../kiosk/icons.js"></script>
+<script src="../dist/nspanel-cards.js"></script>
+<script>
+// No HA connection: every command is recorded locally and never sent anywhere.
+if (!customElements.get('ha-icon')) customElements.define('ha-icon', class extends HTMLElement {});
+const fixture = document.querySelector('#fixture');
+const calls = [];
+const results = [];
+// CLI Chromium's virtual clock can advance timers without painting a frame.
+// Drain only a pending card render so these tests do not depend on its scheduler.
+const pause = () => new Promise((resolve) => setTimeout(() => {
+  if (card && card._raf !== null) {
+    cancelAnimationFrame(card._raf);
+    card._raf = null;
+    card._render();
+  }
+  resolve();
+}, 30));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+let card;
+function state(modes, value = 'on', attributes = {}) {
+  return { entity_id: 'light.test', state: value,
+    attributes: { friendly_name: 'Test light', supported_color_modes: modes, brightness: 128, ...attributes } };
+}
+function setState(s) {
+  card.hass = { states: s ? { 'light.test': s } : {},
+    callService: (domain, service, data) => { calls.push({ domain, service, data }); return Promise.resolve(); } };
+}
+async function mount(s, config = {}) {
+  if (_sheet && _sheet.parentNode) _sheet.close();
+  fixture.replaceChildren();
+  calls.length = 0;
+  card = document.createElement('nspanel-light-card');
+  card.setConfig({ entity: 'light.test', height: 260, haptics: false, ...config });
+  fixture.append(card);
+  setState(s);
+  await pause();
+}
+const visible = (node) => !!node && node.isConnected && getComputedStyle(node).display !== 'none' && !node.hidden;
+async function test(name, fn) {
+  try { await fn(); results.push({ name, passed: true }); }
+  catch (e) { results.push({ name, passed: false, error: e.message }); }
+}
+async function run() {
+  const cases = await (await fetch('light-capabilities.json')).json();
+  for (const c of cases) await test(c.name, () => {
+    const actual = lightCapabilities(c.state);
+    for (const key of ['available', 'brightness', 'color', 'temperature'])
+      assert(actual[key] === c[key], key + ' differs');
+  });
+  await test('onoff presentation and gestures', async () => {
+    await mount(state(['onoff']));
+    assert(!visible(card._elValue), 'unexpected percentage');
+    assert(!visible(card._elPresets), 'unexpected default presets');
+    card._onDown({ pointerId: 1, clientX: 20, clientY: 100, button: 0 });
+    card._onMove({ pointerId: 1, clientX: 20, clientY: 20 });
+    card._onUp({ pointerId: 1 });
+    assert(calls.length === 0, 'vertical movement switched relay');
+    card._onDown({ pointerId: 2, clientX: 20, clientY: 100, button: 0 });
+    card._onMove({ pointerId: 2, clientX: 120, clientY: 100 });
+    card._onUp({ pointerId: 2 });
+    assert(calls.length === 0, 'horizontal movement switched relay');
+    card._onDown({ pointerId: 3, clientX: 20, clientY: 100, button: 0 });
+    card._onUp({ pointerId: 3 });
+    assert(calls.length === 1 && calls[0].service === 'toggle', 'tap must toggle exactly once');
+    assert(Object.keys(calls[0].data).join(',') === 'entity_id', 'unexpected relay parameters');
+  });
+  await test('long press and close issue no commands', async () => {
+    await mount(state(['onoff']), { long_press_ms: 10 });
+    card._onDown({ pointerId: 1, clientX: 20, clientY: 100, button: 0 });
+    await pause();
+    card._onUp({ pointerId: 1 });
+    assert(card._sheetOpen, 'long press did not open dialog');
+    assert(!visible(sheet()._body), 'unexpected slider');
+    sheet().close();
+    assert(calls.length === 0, 'hold or close sent a command');
+  });
+  await test('long press none', async () => {
+    await mount(state(['onoff']), { long_press: 'none', long_press_ms: 10 });
+    card._onDown({ pointerId: 1, clientX: 20, clientY: 100, button: 0 });
+    await pause();
+    card._onUp({ pointerId: 1 });
+    assert(!card._sheetOpen && calls.length === 0, 'disabled hold acted');
+  });
+  await test('live dialog and unavailable guard', async () => {
+    await mount(state(['onoff']));
+    card._openSheet();
+    setState(state(['onoff'], 'off'));
+    await pause();
+    assert(sheet()._state.textContent === 'Off', 'stale dialog state');
+    assert(sheet()._actions.lastChild.textContent === 'Turn on', 'stale action');
+    setState(state(['onoff'], 'unavailable'));
+    await pause();
+    assert(sheet()._state.textContent === 'Unavailable', 'missing unavailable state');
+    assert(sheet()._actions.lastChild.disabled, 'action remains enabled');
+    card._commit(.5); card._onTap(); card._applyPreset({ scene: 'scene.evening' });
+    assert(calls.length === 0, 'stale action bypassed guard');
+  });
+  await test('explicit presets remain visible but incompatible ones are disabled', async () => {
+    await mount(state(['onoff']), { presets: [
+      { name: 'Half', brightness_pct: 50 }, { name: 'Scene', scene: 'scene.evening' },
+      { name: 'Off', brightness_pct: 0 }, { name: 'Red', rgb_color: [255, 0, 0] }
+    ] });
+    const buttons = card._elPresets.children;
+    assert(buttons[0].disabled && buttons[3].disabled, 'incompatible presets enabled');
+    assert(!buttons[1].disabled && !buttons[2].disabled, 'valid presets disabled');
+    buttons[0].click(); buttons[3].click();
+    assert(calls.length === 0, 'disabled preset sent a command');
+    buttons[1].click(); buttons[2].click();
+    assert(calls.length === 2 && calls[0].domain === 'scene' && calls[1].service === 'turn_off', 'valid presets lost');
+  });
+  await test('dimmer capability change updates open dialog', async () => {
+    await mount(state(['brightness']));
+    assert(visible(card._elValue) && visible(card._elPresets), 'dimmer controls missing');
+    card._openSheet();
+    assert(visible(sheet()._lightBody), 'dimmer sheet missing');
+    setState(state(['onoff']));
+    await pause();
+    assert(!visible(sheet()._lightBody) && !visible(card._elValue), 'stale brightness UI');
+    sheet()._step(5); card._commit(.75);
+    assert(calls.length === 0, 'stale brightness handler acted');
+  });
+  await test('shared sheet keeps its default level controls', async () => {
+    sheet().open({ title: 'Cover', state: 'Open', value: .5, onCommit: (v) => calls.push(v) });
+    assert(visible(sheet()._body), 'other card lost its slider');
+    calls.length = 0; sheet()._step(5);
+    assert(calls.length === 1 && Math.abs(calls[0] - .55) < .001, 'default step broken');
+    sheet().close();
+  });
+  await test('cancelled sheet drag does not commit', async () => {
+    await mount(state(['brightness'])); card._openSheet();
+    const sh = sheet();
+    // A real pointer-cancel terminates an active drag without invoking onCommit.
+    sh._trackActive = true;
+    sh._track.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 }));
+    assert(!sh._trackActive && calls.length === 0, 'cancel committed a value');
+    sh.close();
+  });
+  for (const listForm of [false, true]) await test(`switch detail target keeps tap entity (list=${listForm})`, async () => {
+    fixture.replaceChildren(); calls.length = 0;
+    card = document.createElement('nspanel-switch-card');
+    const item = { entity: 'switch.power', detail_entity: ' fan.speed ' };
+    card.setConfig({ haptics: false, ...(listForm ? { switches: [item] } : item) });
+    fixture.append(card);
+    card.hass = { states: { 'switch.power': { entity_id: 'switch.power', state: 'off', attributes: {} } },
+      callService: (domain, service, data) => { calls.push({domain, service, data}); return Promise.resolve(); } };
+    await pause();
+    const opened = [];
+    card.addEventListener('hass-more-info', (e) => opened.push(e.detail.entityId));
+    const button = card.shadowRoot.querySelector('.btn');
+    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    assert(opened.join() === 'fan.speed' && calls.length === 0, 'hold target or no-service contract wrong');
+    button.click();
+    assert(calls.length === 1 && calls[0].data.entity_id === 'switch.power' && calls[0].service === 'turn_on', 'tap redirected');
+  });
+  await test('switch detail target fallback and more_info guard', async () => {
+    for (const detail of ['', '   ', 12]) {
+      card.setConfig({ entity: 'switch.power', detail_entity: detail, haptics: false });
+      await pause();
+      const opened = [];
+      card.addEventListener('hass-more-info', (e) => opened.push(e.detail.entityId), {once:true});
+      card.shadowRoot.querySelector('.btn').dispatchEvent(new MouseEvent('contextmenu', {cancelable:true}));
+      assert(opened.join() === 'switch.power', 'invalid optional target did not fall back');
+    }
+    card.setConfig({ entity: 'switch.power', detail_entity: 'fan.speed', more_info: false });
+    await pause();
+    const opened = []; calls.length = 0;
+    card.addEventListener('hass-more-info', (e) => opened.push(e.detail.entityId));
+    card.shadowRoot.querySelector('.btn').dispatchEvent(new MouseEvent('contextmenu', {cancelable:true}));
+    assert(!opened.length && !calls.length, 'disabled hold sent event or command');
+  });
+  await test('switch editor exposes detail target for shorthand and list entries', () => {
+    assert(SWITCH_SCHEMA.some((row) => row.name === 'detail_entity'), 'missing shorthand editor');
+    const list = SWITCH_SCHEMA.find((row) => row.name === 'switches');
+    assert(JSON.stringify(list).includes('detail_entity'), 'missing list editor');
+  });
+
+  const colors = await (await fetch('light-color.json')).json();
+  for (const c of colors) await test('color: '+c.name, () => {
+    const p=lightColorPolicy(c.state);
+    assert(p.white===c.white && p.color===c.color,'capabilities differ');
+    assert(JSON.stringify(p.range)===JSON.stringify(c.range),'range differs');
+    for(const [k,v] of Object.entries(c.values))assert(Math.abs(p.values[k]-v)<.00001,k+' differs');
+  });
+  const attrs={color_mode:'hs',hs_color:[180,40],brightness:128,min_color_temp_kelvin:2000,max_color_temp_kelvin:6500,color_temp_kelvin:3000,supported_features:4,effect_list:['Solid','Rainbow'],effect:'Solid'};
+  const colorState=(value='on',extra={})=>state(['rgb','color_temp'],value,{...attrs,...extra});
+  const favorites=[{effect:'Solid'},{effect:'Rainbow',name:'Regenbogen'},{effect:'Missing'}];
+  const details=async(config={},s=colorState())=>{await mount(s,config);card._openSheet();return card._lightDialog;};
+  const last=()=>calls[calls.length-1];
+  const stableOpacity=()=>assert([...sheet().shadowRoot.querySelectorAll('.light-track,.light-steps button,.act')].every(n=>getComputedStyle(n).opacity==='1'),'temporary lock faded a control');
+  await test('brightness default, single property, normalized last-used steps and reset',async()=>{
+    let d=await details();await d.commit('hue',.75);d.step(1);await pause();
+    assert(last().data.brightness_pct===55,'default target changed');
+    d=await details({step_target:'last_used'});assert(d.active==='brightness','open default');
+    await d.commit('hue',.99);d.browse('Presets');d.browse(null);d.step(1);await pause();
+    assert(last().data.hs_color[0]===14 && Object.keys(last().data).length===2,'hue wrap or payload');
+    sheet()._actions.firstChild.click();assert(d.active==='brightness' && d.channels()[0]==='temperature','mode reset');
+    await d.commit('temperature',.5);d.step(1);await pause();
+    assert(last().data.color_temp_kelvin===4475,'temperature percentage step');
+    sheet().close();card._openSheet();assert(card._lightDialog.active==='brightness','reopen default');
+  });
+  await test('pointer cancellation neither sends nor changes target; release commits once',async()=>{
+    const d=await details({step_target:'last_used'}),n=d.tracks.hue,r=n.getBoundingClientRect();
+    // Synthetic pointer IDs have no browser capture; exercise the real listeners with capture stubbed.
+    n.setPointerCapture=()=>{};
+    n.dispatchEvent(new PointerEvent('pointerdown',{pointerId:42,button:0,clientY:r.top+r.height*.5}));
+    n.dispatchEvent(new PointerEvent('pointermove',{pointerId:42,clientY:r.top+r.height*.2}));
+    assert(!calls.length && d.values().hue>.7,'preview should be local');
+    assert(d.tracks.brightness.disabled,'other track input guard');stableOpacity();
+    n.dispatchEvent(new PointerEvent('pointercancel',{pointerId:42}));assert(!calls.length&&d.active==='brightness','cancel');
+    n.dispatchEvent(new PointerEvent('pointerdown',{pointerId:43,button:0,clientY:r.top+r.height*.25}));
+    n.dispatchEvent(new PointerEvent('pointerup',{pointerId:43,clientY:r.top+r.height*.25}));await pause();
+    assert(calls.length===1&&last().data.hs_color[0]===270&&d.active==='hue','release');
+  });
+  await test('pending locks controls and rejection rolls back',async()=>{
+    const d=await details();let reject;
+    card._hass.callService=(domain,service,data)=>{calls.push({domain,service,data});return new Promise((_,r)=>reject=r);};
+    const pending=d.commit('hue',.75);assert(d.tracks.hue.disabled,'pending input');d.step(1);assert(calls.length===1,'duplicate');stableOpacity();
+    reject(new Error('test'));await pending;
+    assert(d.error==='Command failed' && d.values().hue===.5 && !d.tracks.hue.disabled,'rollback');
+  });
+  await test('timeout shows error without retry and unlocks controls',async()=>{
+    const d=await details();card._hass.callService=()=>new Promise(()=>{});
+    const original=window.setTimeout;let expire;
+    window.setTimeout=(fn,delay,...args)=>delay===10000?(expire=fn,0):original(fn,delay,...args);
+    try {const pending=d.commit('hue',.75);expire();await pending;assert(d.error==='No response'&&!d.busy&&d.values().hue===.5,'timeout rollback');}
+    finally {window.setTimeout=original;}
+  });
+  await test('off color omits brightness, brightness zero turns off',async()=>{
+    const d=await details({},colorState('off'));await d.commit('hue',.25);
+    assert(last().service==='turn_on'&&Object.keys(last().data).join(',')==='entity_id,hs_color','off color');
+    await d.commit('brightness',0);assert(last().service==='turn_off'&&Object.keys(last().data).length===1,'zero');
+  });
+  await test('effect choices order, selected and unavailable entries; closes after success',async()=>{
+    const d=await details({effect_favorites:favorites});d.browse('Effects');
+    const buttons=d.choices.children;
+    assert(buttons[0].disabled&&buttons[0].classList.contains('selected')&&buttons[2].disabled,'choice guards');
+    assert(getComputedStyle(buttons[0]).opacity==='1'&&getComputedStyle(buttons[0]).boxShadow.includes('inset'),'selected effect must remain visible with a border');
+    assert(getComputedStyle(buttons[2]).opacity==='0.35','unsupported effect remains subdued');
+    const count=calls.length;buttons[0].click();await pause();assert(calls.length===count,'selected effect sent again');
+    assert(buttons[1].textContent==='Regenbogen','label or order');buttons[1].click();await pause();
+    assert(last().data.effect==='Rainbow'&&Object.keys(last().data).length===2&&!d.alive,'effect request');
+  });
+  await test('connectivity-only changes disable dialog and color capability loss falls back',async()=>{
+    const d=await details({step_target:'last_used'});await d.commit('hue',.75);
+    setState(state(['brightness']));await pause();assert(d.active==='brightness'&&!d.tracks.hue,'capability loss');
+    card.hass={...card.hass,connection:{connected:false}};await pause();assert(d.tracks.brightness.disabled,'connection update skipped');assert(getComputedStyle(d.tracks.brightness).opacity==='.55'||getComputedStyle(d.tracks.brightness).opacity==='0.55','unavailable state lost its visual cue');
+    const before=calls.length;d.step(1);assert(calls.length===before,'offline request');
+  });
+  await test('white target survives brightness preview',async()=>{
+    const d=await details({},colorState('on',{color_mode:'color_temp'}));
+    const fill=d.tracks.brightness.querySelector('.light-fill'),color=fill.style.background;
+    d.drag='brightness';d.draft={...d.values(),brightness:.9};d.render();assert(fill.style.background===color,'white became RGB');
+    d.drag=null;d.draft={};d.render();
+  });
+  await test('switch light details share dialog, item overrides config, target-only updates live',async()=>{
+    sheet().close();fixture.replaceChildren();calls.length=0;
+    card=document.createElement('nspanel-switch-card');
+    card.setConfig({haptics:false,step_target:'brightness',switches:[{entity:'switch.quick',detail_entity:'light.test',step_target:'last_used',effect_favorites:favorites}]});fixture.append(card);
+    const quick={entity_id:'switch.quick',state:'off',attributes:{}};
+    const hass={states:{'switch.quick':quick,'light.test':colorState()},callService:(domain,service,data)=>{calls.push({domain,service,data});return Promise.resolve();}};
+    card.hass=hass;await pause();card.shadowRoot.querySelector('.btn').dispatchEvent(new MouseEvent('contextmenu',{cancelable:true}));
+    const d=card._lightDialog;assert(d&&d.config.step_target==='last_used'&&d.favorites().length===3,'shared config');
+    await d.commit('hue',.25);assert(last().data.entity_id==='light.test','detail target');
+    card.hass={...hass,states:{...hass.states,'light.test':colorState('unavailable')}};await pause();
+    assert(sheet()._state.textContent==='Unavailable'&&d.tracks.hue.disabled,'separate target stale');
+    sheet().close();card.shadowRoot.querySelector('.btn').click();assert(last().data.entity_id==='switch.quick','tap changed target');
+  });
+  await test('editor exposes step target and effect favorites for card and switch items',()=>{
+    for(const schema of [LIGHT_SCHEMA,SWITCH_SCHEMA])assert(JSON.stringify(schema).includes('step_target')&&JSON.stringify(schema).includes('effect_favorites'),'schema missing');
+    const items=SWITCH_SCHEMA.find(r=>r.name==='switches');assert(JSON.stringify(items).includes('effect_favorites'),'item schema');
+  });
+
+
+  await test('last values are confirmed state only; off details and tiles stay separate',async()=>{
+    const d=await details({effect_favorites:favorites});
+    const onColor=getComputedStyle(sheet()._actions.lastChild).backgroundColor;
+    assert(onColor!=='rgb(255, 183, 74)','HS power still amber');
+    setState(colorState('off',{brightness:null,hs_color:null,rgb_color:null,color_mode:null,color_temp_kelvin:null,effect:null}));await pause();
+    assert(d.values().brightness===128/255&&d.values().hue===.5,'last levels missing');
+    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor==='rgb(22, 25, 31)','off RGB power is not neutral');
+    assert(getComputedStyle(sheet()._actions.lastChild).color==='rgb(255, 255, 255)','off RGB power text is not light');
+    assert(sheet()._state.textContent==='Off · last values','history label missing');
+    assert(!card._card.classList.contains('on')&&card._card.style.getPropertyValue('--ns-fill')==='0','off tile appears on');
+    d.browse('Effects');const selected=d.choices.children[0];assert(selected.classList.contains('selected')&&!selected.disabled,'last effect cannot be used to switch on');
+    d.browse(null);assert(calls.length===0,'opening history actuated light');
+    sheet()._actions.lastChild.click();await pause();
+    assert(last().service==='turn_on'&&Object.keys(last().data).join(',')==='entity_id','power restored cached parameters');
+  });
+  await test('off rejection and service acknowledgement never become remembered state',async()=>{
+    const d=await details();setState(colorState('off',{brightness:null}));await pause();
+    const memory=d.memory(),before=memory.encode();
+    card.hass={...card.hass,callService:()=>Promise.reject(Error('refused'))};await d.commit('brightness',.8);
+    assert(d.values().brightness===128/255&&memory.encode()===before,'rejected value remembered');
+    card.hass={...card.hass,callService:()=>Promise.resolve()};await d.commit('brightness',.8);
+    assert(memory.encode()===before,'acknowledgement learned optimistic value');
+    d.drag='hue';d.draft={hue:.1};d.render();assert(memory.encode()===before,'draft learned');d.drag=null;d.draft={};
+  });
+  await test('last temperature mode survives missing off attributes and capabilities remain live',async()=>{
+    const d=await details({},colorState('on',{color_mode:'color_temp',color_temp_kelvin:4000}));
+    const warm=getComputedStyle(sheet()._actions.lastChild).backgroundColor;
+    assert(warm!=='rgb(255, 183, 74)','TW power still amber');
+    setState(colorState('off',{brightness:null,hs_color:null,color_mode:null,color_temp_kelvin:null}));await pause();
+    assert(d.channels()[0]==='temperature'&&Math.abs(d.values().temperature-2000/4500)<.00001,'temperature mode lost');
+    assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor==='rgb(22, 25, 31)','off TW power is not neutral');
+    setState(state(['onoff'],'off',{brightness:null}));await pause();assert(d.channels().length===0,'cached capabilities resurrected');
+    setState(state(['rgb'],'unavailable'));await pause();assert(!d.available(),'history hides unavailable');
+  });
+  await test('power preview respects explicit accent and follow_color false',async()=>{
+    for(const [config,expected] of [[{accent:'#12abcd'},'rgb(18, 171, 205)'],[{follow_color:false},'rgb(255, 183, 74)']]) {
+      await details(config,colorState('on'));
+      assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor===expected,'configured accent ignored');
+      setState(colorState('off'));await pause();
+      assert(getComputedStyle(sheet()._actions.lastChild).backgroundColor==='rgb(22, 25, 31)','accent overrode neutral off power');
+      assert(calls.length===0,'preview sent command');
+    }
+  });
+  await test('light memory storage restart, batching, origin isolation and corruption',()=>{
+    const data=new Map(),storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v)};
+    const m=new LightMemory('one',storage);m.observe('light.test',colorState());m.observe('light.test',colorState('on',{brightness:180}));
+    assert(data.size===0,'writes not batched');m.observe('light.test',colorState('off',{brightness:0}));
+    const restarted=new LightMemory('one',storage);assert(restarted.resolve('light.test',colorState('off',{brightness:null})).brightness===180,'restart lost state');
+    assert(new LightMemory('two',storage).lights.size===0,'origin leak');
+    data.set('bad','{bad');assert(new LightMemory('bad',storage).lights.size===0,'corruption fatal');
+    data.set('future',JSON.stringify({version:2,lights:{'light.test':attrs}}));assert(new LightMemory('future',storage).lights.size===0,'unknown version accepted');
+    const blocked=new LightMemory('blocked',{getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}});blocked.observe('light.test',colorState());blocked.flush();assert(blocked.resolve('light.test',colorState('off',{brightness:null})).brightness===128,'blocked storage lost session memory');
+  });
+  await test('live RGB wins over cached HS; null, zero and invalid attributes cannot poison memory',()=>{
+    const m=new LightMemory('validation',null);m.observe('light.test',colorState());
+    m.observe('light.test',colorState('on',{brightness:0,hs_color:[NaN,40],color_temp_kelvin:-4}));
+    const a=m.resolve('light.test',state(['rgb'],'off',{brightness:null,hs_color:null,rgb_color:[255,0,0],color_temp:250,color_temp_kelvin:null}));
+    assert(a.brightness===128&&!a.hs_color&&a.rgb_color[0]===255&&a.color_temp_kelvin===4000,'live/fallback precedence');
+    m.observe('light.test',state(['rgb'],'unavailable',{brightness:42}));assert(m.resolve('light.test',state(['rgb'],'off',{brightness:null})).brightness===128,'unavailable poisoned memory');
+    m.observe('light.test',null);assert(m.lights.size===0,'deleted entity retained');
+  });
+  await test('light memory stays bounded and keeps entity IDs isolated',()=>{
+    const m=new LightMemory('bounded',null);for(let i=0;i<140;i++)m.observe('light.'+i,state(['brightness'],'on',{brightness:i+1}));
+    assert(m.lights.size===128&&!m.lights.has('light.0')&&m.lights.get('light.139').brightness===140,'bound or entity isolation');
+  });
+  await mount(state(['onoff']));
+  const preview = new URLSearchParams(location.search).get('preview');
+  if (preview === 'dimmer') { await mount(state(['brightness'])); card._openSheet(); }
+  if (['rgb','tw','effects'].includes(preview)) { await mount(colorState('on',preview==='tw'?{color_mode:'color_temp'}:{}),{step_target:'last_used',effect_favorites:favorites}); card._openSheet(); if(preview==='effects')card._lightDialog.browse('Effects'); }
+  if (preview === 'sheet') card._openSheet();
+  window.lightTestResults = results;
+  document.querySelector('#result').textContent = JSON.stringify(results, null, 2);
+  document.documentElement.dataset.testStatus = results.every((r) => r.passed) ? 'passed' : 'failed';
+  if (preview) document.querySelector('#result').style.display = 'none';
+}
+run().catch((e) => {
+  document.documentElement.dataset.testStatus = 'failed';
+  document.querySelector('#result').textContent = e.stack;
+});
+</script>

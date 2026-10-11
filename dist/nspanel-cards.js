@@ -483,6 +483,11 @@ class NsSheet extends HTMLElement {
     this._tfill = this.shadowRoot.querySelector('.tfill');
     this._tval = this.shadowRoot.querySelector('.tval');
     this._actions = this.shadowRoot.querySelector('.actions');
+    this._body = this.shadowRoot.querySelector('.body');
+    this._binaryState = document.createElement('div');
+    this._binaryState.style.cssText = 'flex:1;display:none;align-items:center;justify-content:center;font-size:36px;font-weight:700';
+    this._body.after(this._binaryState);
+    this._trackActive = false;
 
     this.shadowRoot.querySelector('.x').addEventListener('click', () => this.close());
     this._scrim.addEventListener('click', () => this.close());
@@ -497,27 +502,10 @@ class NsSheet extends HTMLElement {
   /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
             actions:[{label, icon, primary, run}] } */
   open(opts) {
-    this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a' }, opts);
-    this.style.setProperty('--ns-accent', this._opts.accent);
-    this._title.textContent = opts.title || '';
-    this._state.textContent = opts.state || '';
-    this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
-    this.setValue(opts.value);
-
-    this._actions.innerHTML = '';
-    (opts.actions || []).forEach((a) => {
-      const b = document.createElement('button');
-      b.className = 'act' + (a.primary ? ' primary' : '');
-      b.innerHTML = (a.icon ? `<ha-icon icon="${a.icon}"></ha-icon>` : '') +
-        `<span>${a.label}</span>`;
-      b.addEventListener('click', () => {
-        haptic(this, 'light');
-        a.run();
-        if (a.close !== false) this.close();
-      });
-      this._actions.appendChild(b);
-    });
-    this._actions.style.display = (opts.actions && opts.actions.length) ? '' : 'none';
+    clearTimeout(this._closeTimer);
+    if (this._opts && this._opts.onClose) this._opts.onClose();
+    this._trackActive = false;
+    this.update(opts);
 
     const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
     if (this.parentNode !== host) {
@@ -531,6 +519,59 @@ class NsSheet extends HTMLElement {
     });
   }
 
+  update(opts) {
+    this.classList.toggle('light-sheet', !!opts.lightDialog);
+    if (!this._lightStyle) {
+      this._lightStyle = document.createElement('style');
+      this._lightStyle.textContent = LIGHT_SHEET_CSS;
+      this.shadowRoot.append(this._lightStyle);
+    }
+    if (this._lightBody && this._lightBody !== opts.lightBody) this._lightBody.remove();
+    this._lightBody = opts.lightBody || null;
+    if (this._lightBody && this._lightBody.parentNode !== this._wrap) this._actions.before(this._lightBody);
+    this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a',
+      showLevel: true, enabled: true }, opts);
+    this.style.setProperty('--ns-accent', this._opts.accent);
+    this._title.textContent = opts.title || '';
+    this._state.textContent = opts.state || '';
+    this._state.style.color = opts.stateColor || '';
+    this._binaryState.textContent = opts.state || '';
+    this._body.style.display = this._opts.showLevel ? '' : 'none';
+    this._binaryState.style.display = this._opts.showLevel || this._lightBody ? 'none' : 'flex';
+    this._body.style.opacity = this._opts.enabled ? '' : '.45';
+    this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
+    if (!this._opts.enabled || !this._opts.showLevel) {
+      this._trackActive = false;
+      this._track.classList.remove('dragging');
+    }
+    this._body.querySelectorAll('.step').forEach((b) => { b.disabled = !this._opts.enabled; });
+    if (!this._trackActive) this.setValue(opts.value);
+    const actions = opts.actions || [];
+    while (this._actions.children.length > actions.length) this._actions.lastChild.remove();
+    actions.forEach((a, i) => {
+      let b = this._actions.children[i];
+      if (!b) {
+        b = document.createElement('button');
+        b.append(document.createElement('ha-icon'), document.createElement('span'));
+        b.addEventListener('click', () => {
+          const current = this._opts.actions[i];
+          if (!this._opts.enabled || current.enabled === false) return;
+          haptic(this, 'light');
+          current.run();
+          if (current.close !== false) this.close();
+        });
+        this._actions.appendChild(b);
+      }
+      b.className = 'act' + (a.primary ? ' primary' : '');
+      b.disabled = !this._opts.enabled || a.enabled === false;
+      b.style.opacity = b.disabled && a.dimWhenDisabled !== false ? '.35' : '';
+      b.firstChild.setAttribute('icon', a.icon || '');
+      b.firstChild.style.display = a.icon ? '' : 'none';
+      b.lastChild.textContent = a.label;
+    });
+    this._actions.style.display = actions.length ? '' : 'none';
+  }
+
   setValue(v) {
     this._value = clamp(v, 0, 1);
     this.style.setProperty('--ns-fill', String(this._value));
@@ -538,13 +579,17 @@ class NsSheet extends HTMLElement {
   }
 
   close() {
+    clearTimeout(this._closeTimer);
+    this._trackActive = false;
+    if (this._opts && this._opts.onClose) this._opts.onClose();
     this._scrim.classList.remove('in');
     this._wrap.classList.remove('in');
     const done = () => { if (this.parentNode) this.parentNode.removeChild(this); };
-    setTimeout(done, 200);
+    this._closeTimer = setTimeout(done, 200);
   }
 
   _step(delta) {
+    if (!this._opts.enabled || !this._opts.showLevel) return;
     haptic(this, 'light');
     const v = clamp(this._value + delta / 100, 0, 1);
     this.setValue(v);
@@ -554,7 +599,6 @@ class NsSheet extends HTMLElement {
 
   _bindTrack() {
     const t = this._track;
-    let active = false;
 
     // the sheet's track is absolute: touch position IS the value. It is a
     // dedicated full-height surface, so there is nothing to be precise about.
@@ -566,7 +610,8 @@ class NsSheet extends HTMLElement {
     };
 
     t.addEventListener('pointerdown', (e) => {
-      active = true;
+      if (!this._opts.enabled || !this._opts.showLevel) return;
+      this._trackActive = true;
       t.setPointerCapture(e.pointerId);
       t.classList.add('dragging');
       const v = valueAt(e.clientY);
@@ -575,19 +620,22 @@ class NsSheet extends HTMLElement {
       haptic(this, 'selection');
     });
     t.addEventListener('pointermove', (e) => {
-      if (!active) return;
+      if (!this._trackActive) return;
       const v = valueAt(e.clientY);
       this.setValue(v);
       if (this._opts.onInput) this._opts.onInput(v);
     });
     const end = () => {
-      if (!active) return;
-      active = false;
+      if (!this._trackActive) return;
+      this._trackActive = false;
       t.classList.remove('dragging');
       if (this._opts.onCommit) this._opts.onCommit(this._value);
     };
     t.addEventListener('pointerup', end);
-    t.addEventListener('pointercancel', end);
+    t.addEventListener('pointercancel', () => {
+      this._trackActive = false;
+      t.classList.remove('dragging');
+    });
   }
 }
 customElements.define('ns-sheet', NsSheet);
@@ -596,6 +644,374 @@ let _sheet = null;
 function sheet() {
   if (!_sheet) _sheet = document.createElement('ns-sheet');
   return _sheet;
+}
+
+/* HA omits current brightness while a light is off. Supported modes are
+   the capability contract; a running on/off effect may restrict it further. */
+function lightCapabilities(s) {
+  const attrs = s && s.attributes || {};
+  const modes = Array.isArray(attrs.supported_color_modes) ? attrs.supported_color_modes : [];
+  const brightness = !(isOn(s) && attrs.color_mode === 'onoff') &&
+    !modes.includes('onoff') &&
+    modes.some((m) => ['brightness', 'color_temp', 'hs', 'xy', 'rgb', 'rgbw', 'rgbww', 'white'].includes(m));
+  const color = brightness && modes.some((m) => ['hs', 'xy', 'rgb', 'rgbw', 'rgbww'].includes(m));
+  return { available: !isBroken(s), brightness, color,
+    temperature: brightness && (modes.includes('color_temp') || color) };
+}
+
+function lightPresetAllowed(s, p) {
+  const c = lightCapabilities(s);
+  if (!c.available) return false;
+  if (p.scene != null || p.brightness_pct === 0) return true;
+  if (p.brightness_pct !== undefined && !c.brightness) return false;
+  if (p.rgb_color !== undefined && !c.color) return false;
+  if (p.color_temp_kelvin !== undefined && !c.temperature) return false;
+  if (p.effect !== undefined) {
+    const a = s.attributes || {};
+    if (!(a.supported_features & 4) || !Array.isArray(a.effect_list) || !a.effect_list.includes(p.effect)) return false;
+  }
+  return true;
+}
+
+/* Last confirmed values are display fallbacks, never a replacement HA state. */
+class LightMemory {
+  constructor(key, storage) {
+    this.key=key; this.storage=storage; this.lights=new Map(); this.timer=null; this.dirty=false; this.lastStates=null;
+    try { if(this.storage===undefined)this.storage=localStorage; this.restore(this.storage?.getItem(key)); } catch(_) { this.storage=null; }
+  }
+  static valid(a={}) {
+    const r={}, number=(v,lo,hi)=>typeof v==='number'&&Number.isFinite(v)&&v>=lo&&v<=hi;
+    if(number(a.brightness,1,255))r.brightness=a.brightness;
+    if(['brightness','color_temp','hs','rgb','rgbw','rgbww','xy','white'].includes(a.color_mode))r.color_mode=a.color_mode;
+    if(Array.isArray(a.hs_color)&&a.hs_color.length===2&&number(a.hs_color[0],0,360)&&number(a.hs_color[1],0,100))r.hs_color=a.hs_color.slice();
+    else if(Array.isArray(a.rgb_color)&&a.rgb_color.length>=3&&a.rgb_color.slice(0,3).every(v=>number(v,0,255)))r.rgb_color=a.rgb_color.slice(0,3);
+    if(number(a.color_temp_kelvin,1,1e6))r.color_temp_kelvin=a.color_temp_kelvin;
+    else if(number(a.color_temp,1,1e6))r.color_temp_kelvin=1e6/a.color_temp;
+    if(typeof a.effect==='string'&&a.effect.length>0&&a.effect.length<=256)r.effect=a.effect;
+    return r;
+  }
+  static merge(old,fresh) {
+    const r={...old};
+    if(fresh.hs_color||fresh.rgb_color){delete r.hs_color;delete r.rgb_color;}
+    return Object.assign(r,fresh);
+  }
+  restore(raw) {
+    try {
+      const data=JSON.parse(raw);
+      if(data?.version!==1||!data.lights||typeof data.lights!=='object'||Array.isArray(data.lights))return;
+      Object.entries(data.lights).forEach(([id,a])=>{if(!id.startsWith('light.')||!a||typeof a!=='object')return;const v=LightMemory.valid(a);if(Object.keys(v).length&&!this.lights.has(id))this.lights.set(id,v);});
+      this.trim();
+    } catch(_) { /* Corrupt or unavailable storage is harmless. */ }
+  }
+  trim() { while(this.lights.size>128)this.lights.delete(this.lights.keys().next().value); }
+  encode() { return JSON.stringify({version:1,lights:Object.fromEntries(this.lights)}); }
+  changed() {
+    this.dirty=true;
+    if(this.storage&&this.timer===null)this.timer=setTimeout(()=>this.flush(),2000);
+  }
+  observe(id,s) {
+    if(!id.startsWith('light.'))return;
+    if(!s){if(this.lights.delete(id))this.changed();return;}
+    if(s.state==='off'){this.flush();return;}
+    if(s.state!=='on')return;
+    const fresh=LightMemory.valid(s.attributes);
+    if(!Object.keys(fresh).length)return;
+    const next=LightMemory.valid(LightMemory.merge(this.lights.get(id)||{},fresh));
+    if(JSON.stringify(next)===JSON.stringify(this.lights.get(id)))return;
+    this.lights.delete(id);this.lights.set(id,next);this.trim();this.changed();
+  }
+  observeHass(hass) {
+    const states=hass?.states;if(!states||states===this.lastStates)return;
+    const previous=this.lastStates;this.lastStates=states;
+    Object.entries(states).forEach(([id,s])=>{if(!previous||previous[id]!==s)this.observe(id,s);});
+    if(previous)Object.keys(previous).forEach(id=>{if(!(id in states))this.observe(id,null);});
+  }
+  resolve(id,s) {
+    const a=s?.attributes||{};if(s?.state!=='off')return a;
+    const values=LightMemory.merge(this.lights.get(id)||{},LightMemory.valid(a)),r={...a};
+    if(values.hs_color||values.rgb_color){delete r.hs_color;delete r.rgb_color;}
+    return Object.assign(r,values);
+  }
+  hasLastValues(id,s) { return s?.state==='off'&&Object.keys(LightMemory.valid(this.resolve(id,s))).some(k=>k!=='color_mode'); }
+  flush() {
+    clearTimeout(this.timer);this.timer=null;if(!this.dirty||!this.storage)return;
+    try{this.storage.setItem(this.key,this.encode());this.dirty=false;}catch(_){/* Keep working in memory when storage is full/blocked. */}
+  }
+}
+const lightMemories=new Map();
+function lightMemory(hass) {
+  let origin=location.origin;
+  try {
+    const u=new URL(hass?.hassUrl||hass?.connection?.options?.auth?.hassUrl||hass?.connection?._url||origin,location.href);
+    if(u.protocol==='ws:')u.protocol='http:';if(u.protocol==='wss:')u.protocol='https:';origin=u.origin;
+  } catch(_) { /* Same-origin HA frontend. */ }
+  const key='nspanel.light-last-values.v1:'+origin;
+  if(!lightMemories.has(key))lightMemories.set(key,new LightMemory(key));
+  const memory=lightMemories.get(key);memory.observeHass(hass);return memory;
+}
+window.addEventListener('pagehide',()=>lightMemories.forEach(m=>m.flush()));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')lightMemories.forEach(m=>m.flush());});
+
+/* Light dialog policy shared by the light card and shortcut detail targets. */
+function lightColorPolicy(s, attributes, lastValues=false) {
+  const a = attributes || s && s.attributes || {}, caps = lightCapabilities(s);
+  const num = (key) => typeof a[key] === 'number' && Number.isFinite(a[key]) ? a[key] : null;
+  let min = num('min_color_temp_kelvin'), max = num('max_color_temp_kelvin');
+  if (min === null || max === null) {
+    const low = num('min_mireds'), high = num('max_mireds');
+    if (low > 0 && high > low) { min = 1e6 / high; max = 1e6 / low; }
+  }
+  const range = min > 0 && max > min && Math.floor(max) > Math.ceil(min) ? [Math.ceil(min), Math.floor(max)] : null;
+  let hs = [0, 100];
+  if (Array.isArray(a.hs_color) && a.hs_color.length === 2 && a.hs_color.every(Number.isFinite)) hs = a.hs_color;
+  else if (Array.isArray(a.rgb_color) && a.rgb_color.length >= 3 && a.rgb_color.slice(0,3).every(Number.isFinite)) {
+    const [r,g,b] = a.rgb_color.map(v => clamp(v,0,255) / 255), hi = Math.max(r,g,b), lo = Math.min(r,g,b), delta = hi-lo;
+    hs = [delta ? ((hi===r ? (g-b)/delta : hi===g ? (b-r)/delta+2 : (r-g)/delta+4)*60+360)%360 : 0, hi ? delta/hi*100 : 0];
+  }
+  const color = caps.color && !(isOn(s) && a.color_mode === 'brightness');
+  const white = caps.brightness && !(isOn(s) && a.color_mode === 'brightness') && range &&
+    (a.supported_color_modes.includes('color_temp') || a.supported_color_modes.includes('rgbww'));
+  const temperature = num('color_temp_kelvin') || (num('color_temp') > 0 ? 1e6/num('color_temp') : range ? (range[0]+range[1])/2 : 0);
+  return { caps, range, color, white: !!white,
+    effects: (a.supported_features & 4) && Array.isArray(a.effect_list) ? a.effect_list.filter(v => typeof v === 'string') : [],
+    values: { brightness: isOn(s) ? clamp((num('brightness') === null ? 255 : num('brightness'))/255,0,1) : lastValues&&s?.state==='off'?clamp((num('brightness')||0)/255,0,1):0,
+      hue: ((hs[0]%360)+360)%360/360, saturation: clamp(hs[1]/100,0,1),
+      temperature: range ? clamp((temperature-range[0])/(range[1]-range[0]),0,1) : .5 },
+  };
+}
+function lightRgb(h, s) {
+  h = ((h%1)+1)%1*6;
+  const x = s*(1-Math.abs(h%2-1)), m = 1-s;
+  const c = h<1 ? [s,x,0] : h<2 ? [x,s,0] : h<3 ? [0,s,x] : h<4 ? [0,x,s] : h<5 ? [x,0,s] : [s,0,x];
+  return c.map(v => Math.round((v+m)*255));
+}
+function lightKelvin(k) {
+  const t = clamp(k,1000,40000)/100;
+  return [t<=66 ? 255 : 329.698727446*Math.pow(t-60,-.1332047592),
+    t<=66 ? 99.4708025861*Math.log(t)-161.1195681661 : 288.1221695283*Math.pow(t-60,-.0755148492),
+    t>=66 ? 255 : t<=19 ? 0 : 138.5177312231*Math.log(t-10)-305.0447927307].map(v => Math.round(clamp(v,0,255)));
+}
+const LIGHT_SHEET_CSS = `
+:host(.light-sheet) .scrim.in { opacity:.72; }
+:host(.light-sheet) .wrap { padding:12px 16px; gap:8px; }
+:host(.light-sheet) .head { min-height:56px; flex:none; }
+:host(.light-sheet) .x { background:#16191f; }
+:host(.light-sheet) .actions { gap:8px; }
+:host(.light-sheet) .act { border-radius:18px; font-size:14px; background:#16191f; }
+:host(.light-sheet) .act.primary { background:var(--ns-accent); }
+.light-body { display:flex; gap:14px; flex:1; min-height:56px; }
+.light-track { position:relative; flex:1; min-width:0; min-height:56px; padding:0; border:0; border-radius:20px; overflow:hidden; background:#16191f; touch-action:none; }
+.light-fill { position:absolute; bottom:0; left:0; width:100%; pointer-events:none; }
+.light-value { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:44px; font-weight:700; font-variant-numeric:tabular-nums; color:#f2f4f7; text-shadow:0 1px 3px rgba(0,0,0,.45),-1px 0 #0b0d10,1px 0 #0b0d10,0 -1px #0b0d10,0 1px #0b0d10; pointer-events:none; }
+.light-body[data-count="3"] .light-value { font-size:32px; }
+.light-value small { font-size:.5em; font-weight:600; }
+.light-marker { position:absolute; width:100%; height:3px; box-shadow:0 -1px 4px rgba(0,0,0,.45); pointer-events:none; }
+.light-track.active .light-marker { height:5px; }
+.light-track.dimmed { opacity:.55; }
+.light-steps { display:flex; flex-direction:column; gap:14px; width:96px; flex:none; }
+.light-steps button { flex:1; border:0; border-radius:18px; background:#16191f; color:#f2f4f7; font-size:34px; min-height:56px; }
+.light-steps button.dimmed { opacity:.35; }
+.light-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:76px; gap:8px; overflow-y:auto; align-content:start; flex:1; min-height:0; }
+.light-choice { display:flex; align-items:center; gap:8px; padding:8px; border:0; border-radius:18px; color:#f2f4f7; background:#16191f; font:600 14px Roboto,system-ui,sans-serif; text-align:left; }
+.light-choice span { overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.light-choice ha-icon { --mdc-icon-size:24px; flex:none; }
+.light-choice.dimmed { opacity:.35; }
+.light-choice.selected { background:linear-gradient(var(--light-selected),var(--light-selected)),#16191f; box-shadow:inset 0 0 0 2px #f2f4f7; }
+@media(max-width:360px) { .light-steps { width:56px; } .light-body { gap:8px; } .light-body[data-count="3"] .light-value { font-size:24px; } }
+@media(max-height:360px) { :host(.light-sheet) .wrap { overflow-y:auto; } .light-body { flex:none; height:180px; } .light-choices { flex:none; max-height:240px; } }
+`;
+class LightDialog {
+  constructor(owner, config, initial) {
+    this.owner = owner; this.config = config; this.initial = initial;
+    this.active = 'brightness'; this.echo = {}; this.draft = {}; this.timers = {};
+    this.busy = false; this.alive = true; this.generation = 0; this.drag = null; this.page = null; this.error = null;
+    const p = this.policy();
+    this.lastState=this.state()?.state;
+    this.white = p.white && (this.attributes().color_mode === 'color_temp' || !p.color);
+    this.body = document.createElement('div'); this.body.className = 'light-body';
+    this.choices = document.createElement('div'); this.choices.className = 'light-choices';
+    if (isOn(this.state()) && Number.isFinite(initial) && initial !== p.values.brightness) this.hold('brightness', initial);
+    owner._sheetOpen = true;
+    sheet().open(this.options());
+    this.render();
+  }
+  state() { return this.owner._hass && this.owner._hass.states[this.config.entity]; }
+  memory() { return lightMemory(this.owner._hass); }
+  attributes() { return this.memory().resolve(this.config.entity,this.state()); }
+  hasLastValues() { return this.policy().caps.brightness && this.memory().hasLastValues(this.config.entity,this.state()); }
+  policy() { return lightColorPolicy(this.state(),this.attributes(),true); }
+  available() { return this.policy().caps.available && this.owner._hass?.connection?.connected !== false; }
+  favorites() { return Array.isArray(this.config.effect_favorites) ? this.config.effect_favorites.filter(p => p && typeof p.effect==='string' && p.effect) : []; }
+  presets() { return Array.isArray(this.config.presets) ? this.config.presets : this.policy().caps.brightness ?
+    [{name:'Low',brightness_pct:15},{name:'Mid',brightness_pct:50},{name:'Full',brightness_pct:100}] : []; }
+  channels() {
+    const p = this.policy();
+    if (this.white && !p.white) this.white=false;
+    if (!this.white && !p.color && p.white) this.white=true;
+    return [...(this.white && p.white ? ['temperature'] : p.color ? ['hue','saturation'] : []), ...(p.caps.brightness ? ['brightness'] : [])];
+  }
+  values() { return Object.assign({},this.policy().values,this.available()?this.echo:{},this.available()?this.draft:{}); }
+  hold(ch,v) {
+    clearTimeout(this.timers[ch]); this.echo[ch]=v;
+    this.timers[ch]=setTimeout(()=>{ if(this.busy)return; delete this.echo[ch]; if(this.alive)this.render(); },clamp(this.config.echo_ms ?? 1500,0,10000));
+  }
+  close() {
+    this.alive=false; this.generation++; Object.values(this.timers).forEach(clearTimeout); clearTimeout(this.requestTimer);
+    this.owner._sheetOpen=false; if(this.owner._lightDialog===this)this.owner._lightDialog=null;
+    this.drag=null; this.draft={};
+  }
+  browse(page) { if(this.drag)return; this.page=page; this.render(); }
+  async send(domain,service,data,close=false) {
+    if(!this.alive || this.busy || !this.available())return false;
+    const generation=++this.generation; this.busy=true; this.error=null; this.render();
+    let ok=false;
+    try {
+      await Promise.race([this.owner._hass.callService(domain,service,data),new Promise((_,reject)=>{
+        this.requestTimer=setTimeout(()=>reject(new Error('No response')),10000);
+      })]); ok=true;
+    } catch(e) { if(this.alive && generation===this.generation)this.error=e.message==='No response'?'No response':'Command failed'; }
+    if(!this.alive || generation!==this.generation)return false;
+    clearTimeout(this.requestTimer);this.busy=false;this.render();
+    if(ok && close)sheet().close(); return ok;
+  }
+  async commit(ch,v) {
+    if(!this.available() || this.busy || !this.channels().includes(ch))return;
+    const p=this.policy(), values=this.values(); this.drag=null;this.draft={};
+    v=clamp(v,0,1);
+    if(ch==='hue')v=(Math.round(v*360)%360)/360;
+    else if(ch==='temperature')v=(Math.round(p.range[0]+v*(p.range[1]-p.range[0]))-p.range[0])/(p.range[1]-p.range[0]);
+    else v=Math.round(v*100)/100;
+    values[ch]=v;
+    if(this.config.step_target==='last_used')this.active=ch;
+    const obsolete=ch==='temperature'?['hue','saturation']:ch==='hue'||ch==='saturation'?['temperature']:[];
+    obsolete.forEach(old=>{clearTimeout(this.timers[old]);delete this.echo[old];});
+    this.hold(ch,v);
+    let service='turn_on', data={entity_id:this.config.entity};
+    if(ch==='brightness') { if(v===0)service='turn_off';else data.brightness_pct=Math.round(v*100); }
+    else if(ch==='temperature')data.color_temp_kelvin=Math.round(p.range[0]+v*(p.range[1]-p.range[0]));
+    else data.hs_color=[Math.round(values.hue*360)%360,Math.round(values.saturation*100)];
+    const generation=this.generation+1;
+    const ok=await this.send('light',service,data);
+    if(!this.alive || generation!==this.generation)return;
+    if(ok) {
+      if(!(ch==='brightness'&&v===0&&this.state()?.state==='off'))this.hold(ch,v);
+      if(ch==='hue'||ch==='saturation'){this.hold('hue',values.hue);this.hold('saturation',values.saturation);}
+    } else { clearTimeout(this.timers[ch]);delete this.echo[ch]; }
+    if(ch==='brightness' && this.owner instanceof NsPanelLightCard) {
+      this.owner._local=ok?v:lightColorPolicy(this.state()).values.brightness;
+      this.owner._localUntil=Date.now()+(this.config.echo_ms??1500);this.owner._scheduleRender();
+    }
+    this.render();
+  }
+  step(direction,ch=this.active) {
+    if(this.drag || this.busy || !this.available() || !this.channels().includes(ch))return;
+    const raw=Number(this.config.step??5), step=Number.isFinite(raw)&&raw>0?clamp(raw,.1,100)/100:.05;
+    const v=this.values()[ch], next=ch==='hue'?((v+direction*step)%1+1)%1:clamp(v+direction*step,0,1);
+    if(next!==v)this.commit(ch,next);
+  }
+  async preset(p) {
+    if(!lightPresetAllowed(this.state(),p))return;
+    const domain=p.scene?'scene':'light', data={entity_id:p.scene||this.config.entity};
+    if(!p.scene && p.brightness_pct!==0)for(const key of ['brightness_pct','rgb_color','color_temp_kelvin','effect'])if(p[key]!==undefined)data[key]=p[key];
+    await this.send(domain,p.brightness_pct===0&&!p.scene?'turn_off':'turn_on',data,true);
+  }
+  options() {
+    const s=this.state(), p=this.policy(), available=this.available(), on=isOn(s);
+    const accent=this.config.accent || (this.config.follow_color!==false && on && Array.isArray(s.attributes.rgb_color)?'rgb('+readableTint(s.attributes.rgb_color).join(',')+')':'#ffb74a');
+    const action=(label,icon,run,enabled=true,primary=false,dimWhenDisabled=false)=>({label,icon,run,enabled,primary,dimWhenDisabled,close:false});
+    const actions=this.page?[action('Back','mdi:arrow-left',()=>this.browse(null))]:[
+      ...(p.white&&p.color?[action(this.white?'Colour':'White','mdi:palette',()=>{this.white=!this.white;this.active='brightness';this.render();},!this.drag)]:[]),
+      ...(this.presets().length?[action('Presets','mdi:format-list-bulleted',()=>this.browse('Presets'),!this.drag)]:[]),
+      ...(this.favorites().length?[action('Effects','mdi:creation',()=>this.browse('Effects'),!this.drag)]:[]),
+      action(on?'Turn off':'Turn on','mdi:power',()=>this.send('light',on?'turn_off':'turn_on',{entity_id:this.config.entity},true),available&&!this.busy&&!this.drag,on,!available),
+    ];
+    return {title:this.page||this.config.title||this.config.name||friendly(s,this.config.entity),
+      state:(available?(on?'On':this.hasLastValues()?'Off · last values':'Off'):'Unavailable')+(this.error?' · '+this.error:this.page==='Effects'&&this.attributes().effect?' · '+this.attributes().effect:''),
+      stateColor:this.error?'#f87171':null,accent,value:0,showLevel:false,enabled:true,actions,
+      lightBody:this.page?this.choices:this.channels().length?this.body:null,
+      lightDialog:true,onClose:()=>this.close()};
+  }
+  buildTracks(channels) {
+    this.layout=channels.join(','); this.body.replaceChildren(); this.tracks={};
+    channels.forEach(ch=>{
+      const node=document.createElement('button');node.className='light-track';node.setAttribute('aria-label',ch);node.setAttribute('role','slider');
+      node.innerHTML='<div class="light-fill"></div><div class="light-marker"></div><div class="light-value"></div>';
+      const at=e=>{const r=node.getBoundingClientRect();return clamp(1-(e.clientY-r.top)/r.height,0,1);};
+      node.addEventListener('pointerdown',e=>{
+        if(e.button!==0 || this.drag || node.disabled)return;
+        this.drag=ch;this.pointer=e.pointerId;this.draft=this.values();this.draft[ch]=at(e);
+        node.setPointerCapture(e.pointerId);this.render();
+      });
+      node.addEventListener('pointermove',e=>{if(this.drag===ch&&this.pointer===e.pointerId){this.draft[ch]=at(e);this.render();}});
+      node.addEventListener('pointerup',e=>{if(this.drag===ch&&this.pointer===e.pointerId)this.commit(ch,at(e));});
+      const cancel=()=>{if(this.drag===ch){this.drag=null;this.draft={};this.render();}};
+      node.addEventListener('pointercancel',cancel);node.addEventListener('lostpointercapture',cancel);
+      node.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowRight','ArrowLeft'].includes(e.key)){e.preventDefault();this.step(['ArrowUp','ArrowRight'].includes(e.key)?1:-1,ch);}});
+      this.tracks[ch]=node;this.body.append(node);
+    });
+    const steps=document.createElement('div');steps.className='light-steps';this.buttons=[];
+    [1,-1].forEach(direction=>{const b=document.createElement('button');b.textContent=direction===1?'+':'−';b.onclick=()=>this.step(direction);steps.append(b);this.buttons.push(b);});
+    this.body.append(steps);
+  }
+  render() {
+    if(!this.alive)return;
+    if(this.lastState!==this.state()?.state){
+      this.lastState=this.state()?.state;this.drag=null;this.draft={};this.echo={};Object.values(this.timers).forEach(clearTimeout);
+      const p=this.policy();this.white=p.white&&(this.attributes().color_mode==='color_temp'||!p.color);
+    }
+    const p=this.policy(), channels=this.channels(), available=this.available();
+    if(!available || this.drag&&!channels.includes(this.drag)) {
+      this.drag=null;this.draft={};this.echo={};Object.values(this.timers).forEach(clearTimeout);
+      if(!available&&this.busy){this.generation++;this.busy=false;clearTimeout(this.requestTimer);}
+    }
+    if(this.config.step_target!=='last_used'||!channels.includes(this.active))this.active='brightness';
+    if(this.layout!==channels.join(','))this.buildTracks(channels);
+    const values=this.values(), s=this.state(), opts=this.options();
+    let rgb=[255,183,74];
+    const preview=(this.drag==='brightness'?null:this.drag) || (this.echo.temperature!==undefined?'temperature':this.echo.hue!==undefined||this.echo.saturation!==undefined?'hue':null);
+    if(p.white && p.range && (preview==='temperature'||!preview&&this.attributes().color_mode==='color_temp'||p.white&&!p.color))rgb=lightKelvin(p.range[0]+values.temperature*(p.range[1]-p.range[0]));
+    else if(p.caps.color)rgb=lightRgb(values.hue,values.saturation);
+    else if(/^#[\da-f]{6}$/i.test(opts.accent))rgb=opts.accent.slice(1).match(/../g).map(v=>parseInt(v,16));
+    const css=c=>'rgb('+c.join(',')+')';this.body.dataset.count=String(channels.length);
+    channels.forEach(ch=>{
+      const node=this.tracks[ch], v=values[ch];node.disabled=!available||this.busy||!!this.drag&&this.drag!==ch;
+      node.classList.toggle('dimmed',!available);
+      node.classList.toggle('active',this.config.step_target==='last_used'&&this.active===ch);
+      node.setAttribute('aria-valuetext',ch==='hue'?Math.round(v*360)%360+' degrees':ch==='temperature'?Math.round(p.range[0]+v*(p.range[1]-p.range[0]))+' kelvin':Math.round(v*100)+'%');
+      node.setAttribute('aria-valuemin','0');node.setAttribute('aria-valuemax','100');node.setAttribute('aria-valuenow',String(Math.round(v*100)));
+      let gradient='';
+      if(ch==='hue')gradient='linear-gradient(to top,red,yellow,lime,cyan,blue,magenta,red)';
+      if(ch==='saturation')gradient='linear-gradient(to top,white,'+css(lightRgb(values.hue,1))+')';
+      if(ch==='temperature')gradient='linear-gradient(to top,'+Array.from({length:9},(_,i)=>css(lightKelvin(p.range[0]+(p.range[1]-p.range[0])*i/8))).join(',')+')';
+      node.style.background=gradient||'#16191f';
+      const fill=node.querySelector('.light-fill');fill.style.height=ch==='brightness'?v*100+'%':'0';fill.style.background=css(rgb);
+      node.querySelectorAll('.light-value').forEach(el=>{el.replaceChildren();if(ch==='brightness'){const value=document.createElement('span'),unit=document.createElement('small');value.textContent=Math.round(v*100);unit.textContent='%';value.append(unit);el.append(value);}});
+      const marker=node.querySelector('.light-marker'),lineHeight=node.classList.contains('active')?5:3;
+      marker.style.top='clamp(0px, calc('+(1-v)*100+'% - '+(ch==='brightness'?0:lineHeight)+'px), calc(100% - '+lineHeight+'px))';
+    });
+    this.buttons.forEach((b,i)=>{b.setAttribute('aria-label',(i===0?'Increase ':'Decrease ')+this.active);
+      const dimmed=!available||!channels.includes(this.active)||this.active!=='hue'&&(i===0?values[this.active]>=1:values[this.active]<=0);
+      b.classList.toggle('dimmed',dimmed);b.disabled=dimmed||this.busy||!!this.drag;});
+    if(this.page) {
+      const scroll=this.choices.scrollTop;
+      this.choices.replaceChildren();this.choices.style.setProperty('--light-selected',tintStops(opts.accent).weak);
+      const effects=this.page==='Effects';
+      (effects?this.favorites():this.presets()).forEach(item=>{
+        const b=document.createElement('button');b.className='light-choice';const selected=effects&&(isOn(s)||this.hasLastValues())&&this.attributes().effect===item.effect;
+        b.classList.toggle('selected',selected);if(effects)b.setAttribute('aria-pressed',String(selected));
+        const dimmed=!available||!(effects?p.effects.includes(item.effect):lightPresetAllowed(s,item));
+        b.classList.toggle('dimmed',dimmed);b.disabled=dimmed||(selected&&isOn(s))||this.busy;
+        const icon=document.createElement('ha-icon');icon.setAttribute('icon',selected?'mdi:check':item.icon||(effects?'mdi:creation':'mdi:lightbulb-outline'));
+        const label=document.createElement('span');label.textContent=item.name||item.effect||item.brightness_pct+'%';b.append(icon,label);
+        b.onclick=()=>{if(effects){if(this.policy().effects.includes(item.effect))this.send('light','turn_on',{entity_id:this.config.entity,effect:item.effect},true);}else this.preset(item);};
+        this.choices.append(b);
+      });
+      this.choices.scrollTop=scroll;
+    }
+    // Power follows the same live/remembered target as the brightness fill.
+    if (!this.config.accent && this.config.follow_color!==false && (p.caps.color || p.white)) opts.accent=css(readableTint(rgb));
+    sheet().update(opts);
+  }
 }
 
 /* ================================================================== *
@@ -626,6 +1042,7 @@ class NsBaseCard extends HTMLElement {
         `this card takes ${this.constructor.domain}.*`
       );
     }
+    this._explicitPresets = Array.isArray(config.presets);
     this._config = Object.assign({
       title: null,
       name: null,            // the original spelling of title; still honoured
@@ -656,12 +1073,16 @@ class NsBaseCard extends HTMLElement {
   set hass(hass) {
     const prev = this._hass;
     this._hass = hass;
+    lightMemory(hass);
     if (!this._config) return;
     // Diff down to the one entity we care about. HA pushes a new hass object on
     // every state change in the house; on this hardware that is the difference
     // between a smooth panel and a stuttering one.
     const id = this._config.entity;
-    if (prev && prev.states[id] === hass.states[id]) return;
+    if (prev && prev.states[id] === hass.states[id]) {
+      if (this._lightDialog) this._lightDialog.render();
+      return;
+    }
     this._sync(false);
   }
 
@@ -770,6 +1191,8 @@ class NsBaseCard extends HTMLElement {
     }
   }
 
+  _canDrag() { return true; }
+
   _onMove(e) {
     const p = this._p;
     if (!p || e.pointerId !== p.id || p.consumed) return;
@@ -784,6 +1207,11 @@ class NsBaseCard extends HTMLElement {
       // in a swipe card, so we let go of it entirely rather than fighting for it.
       if (this._config.swipe_safe && adx >= ady) {
         p.axis = 'x';
+        this._cancelPress();
+        return;
+      }
+      if (!this._canDrag()) {
+        p.consumed = true;
         this._cancelPress();
         return;
       }
@@ -867,6 +1295,22 @@ class NsPanelLightCard extends NsBaseCard {
       { name: 'Mid', brightness_pct: 50 },
       { name: 'Full', brightness_pct: 100 },
     ];
+  }
+
+  setConfig(config) {
+    if (this._lightDialog) sheet().close();
+    super.setConfig(config);
+  }
+
+  _canDrag() { return lightCapabilities(this._stateObj).brightness; }
+
+  _presets() {
+    return this._explicitPresets || this._canDrag() ? this._config.presets : [];
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this._sheetOpen) sheet().close();
   }
 
   _entityValue() {
@@ -970,6 +1414,7 @@ class NsPanelLightCard extends NsBaseCard {
   }
 
   _applyPreset(p) {
+    if (!lightPresetAllowed(this._stateObj, p)) return;
     const data = {};
     if (p.brightness_pct !== undefined) data.brightness_pct = p.brightness_pct;
     if (p.color_temp_kelvin !== undefined) data.color_temp_kelvin = p.color_temp_kelvin;
@@ -986,41 +1431,18 @@ class NsPanelLightCard extends NsBaseCard {
     this._call('light', 'turn_on', data);
   }
 
-  _onTap() { this._call('light', 'toggle'); }
+  _onTap() { if (!isBroken(this._stateObj)) this._call('light', 'toggle'); }
 
   _commit(v) {
+    if (isBroken(this._stateObj) || !this._canDrag()) return;
     const pct = Math.round(v * 100);
     if (pct <= 0) this._call('light', 'turn_off');
     else this._call('light', 'turn_on', { brightness_pct: pct });
   }
 
   _openSheet() {
-    const s = this._stateObj;
-    const acts = (this._config.presets || []).slice(0, 3).map((p) => ({
-      label: p.name || `${p.brightness_pct}%`,
-      icon: p.icon || 'mdi:lightbulb-on-outline',
-      run: () => this._applyPreset(p),
-    }));
-    acts.push({
-      label: isOn(s) ? 'Turn off' : 'Turn on',
-      icon: isOn(s) ? 'mdi:lightbulb-off' : 'mdi:lightbulb-on',
-      primary: true,
-      run: () => this._call('light', 'toggle'),
-    });
-    sheet().open({
-      title: this._title(),
-      state: isOn(s) ? 'On' : 'Off',
-      value: this._displayValue(),
-      accent: this._liveAccent(),
-      step: this._config.step,
-      actions: acts,
-      onInput: (v) => {
-        this._local = v;
-        this._localUntil = Date.now() + this._config.echo_ms;
-        this._scheduleRender();
-      },
-      onCommit: (v) => this._commit(v),
-    });
+    if (isBroken(this._stateObj)) return;
+    this._lightDialog = new LightDialog(this, this._config, this._displayValue());
   }
 
   _render() {
@@ -1029,7 +1451,9 @@ class NsPanelLightCard extends NsBaseCard {
     const s = this._stateObj;
     const broken = isBroken(s);
     const on = isOn(s);
-    const v = this._displayValue();
+    const dimmable = this._canDrag();
+    if (!dimmable || broken) { this._local = null; this._localUntil = 0; }
+    const v = dimmable ? this._displayValue() : (on ? 1 : 0);
     const pct = Math.round(v * 100);
 
     this._card.classList.toggle('unavailable', broken);
@@ -1044,12 +1468,16 @@ class NsPanelLightCard extends NsBaseCard {
       cfg.icon || (s && s.attributes.icon) || (on ? 'mdi:lightbulb-on' : 'mdi:lightbulb-outline'));
     this._elName.textContent = this._title();
 
-    if (this._valueShown !== pct || this._onShown !== on) {
-      this._valueShown = pct;
-      this._onShown = on;
-      this._elValue.innerHTML = on ? `${pct}<small>%</small>` : '';
-      this._elSub.textContent = broken ? 'Unavailable' : (on ? `On · ${pct}%` : 'Off');
-    }
+    this._elValue.style.display = dimmable && on ? '' : 'none';
+    const label = dimmable && on ? `${pct}` : '';
+    if (this._elValue.firstChild.nodeType === Node.TEXT_NODE) this._elValue.firstChild.textContent = label;
+    this._elSub.textContent = broken ? 'Unavailable' : (on ? (dimmable ? `On · ${pct}%` : 'On') : 'Off');
+    this._elPresets.style.display = cfg.show_presets && this._presets().length ? '' : 'none';
+    Array.from(this._elPresets.children).forEach((button, i) => {
+      button.disabled = !lightPresetAllowed(s, cfg.presets[i]);
+      button.style.opacity = button.disabled ? '.35' : '';
+    });
+    if (this._lightDialog) this._lightDialog.render();
   }
 }
 
@@ -1521,6 +1949,7 @@ class NsInfoCard extends HTMLElement {
   set hass(hass) {
     const prev = this._hass;
     this._hass = hass;
+    lightMemory(hass);
     if (!this._config) return;
     this._afterHass(prev);
     if (prev) {
@@ -2177,7 +2606,7 @@ class NsPanelSwitchCard extends NsInfoCard {
     const cfg = this._config;
     const list = Array.isArray(cfg.switches) && cfg.switches.length
       ? cfg.switches
-      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon }] : []);
+      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon, detail_entity: cfg.detail_entity, step_target: cfg.step_target, step: cfg.step, effect_favorites: cfg.effect_favorites }] : []);
     return list
       .map((it) => (typeof it === 'string' ? { entity: it } : it))
       .filter((it) => it && it.entity)
@@ -2186,7 +2615,10 @@ class NsPanelSwitchCard extends NsInfoCard {
 
   _entityIds() { return this._items.map((i) => i.entity); }
 
+  _afterHass() { if (this._lightDialog) this._lightDialog.render(); }
+
   _teardown() {
+    if (this._lightDialog) sheet().close();
     (this._timers || []).forEach((t) => clearTimeout(t));
     this._timers = [];
   }
@@ -2261,7 +2693,20 @@ class NsPanelSwitchCard extends NsInfoCard {
       el.addEventListener('click', () => this._press(b));
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        if (this._config.more_info) moreInfo(this, item.entity);
+        if (this._config.more_info) {
+          const target = typeof item.detail_entity === 'string' && item.detail_entity.trim()
+            ? item.detail_entity.trim() : item.entity;
+          if (target.startsWith('light.')) {
+            if (this._lightDialog) sheet().close();
+            this._lightDialog = new LightDialog(this, {
+              entity: target, name: item.name, accent: this._config.accent,
+              echo_ms: this._config.echo_ms,
+              step: item.step ?? this._config.step,
+              step_target: item.step_target ?? this._config.step_target,
+              effect_favorites: item.effect_favorites ?? this._config.effect_favorites,
+            });
+          } else moreInfo(this, target);
+        }
       });
       pad.appendChild(el);
       return b;
@@ -3820,6 +4265,9 @@ const EDITOR_LABELS = {
   entities: 'Entities',
   buttons: 'Buttons',
   switches: 'Switches',
+  detail_entity: 'Long-press detail entity',
+  step_target: 'Plus/minus target',
+  effect_favorites: 'Effect favourites',
   severity: 'Severity colours',
   name: 'Name',
   brightness_pct: 'Brightness (%)',
@@ -4183,7 +4631,19 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
 ]);
 
 /* The light card is the only one whose accent can come from the entity. */
-const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
+const LIGHT_DETAIL_FIELDS = {
+  step_target: { selector: { select: { options: [
+    {value: 'brightness', label: 'Always brightness'},
+    {value: 'last_used', label: 'Last used slider (starts with brightness)'},
+  ] } } },
+  effect_favorites: { selector: listOf({
+    effect: {required: true, selector: {text: {}}},
+    name: {selector: {text: {}}}, icon: {selector: {icon: {}}},
+  }, 'name', 'effect') },
+};
+const LIGHT_DETAIL_SCHEMA = Object.entries(LIGHT_DETAIL_FIELDS).map(([name, field]) => ({name, ...field}));
+
+const LIGHT_SCHEMA = SHARED_SCHEMA.concat(LIGHT_DETAIL_SCHEMA, [
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
 ]);
@@ -4273,6 +4733,9 @@ const SWIPE_SCHEMA = [
 ];
 
 const SWITCH_SCHEMA = [
+  ...LIGHT_DETAIL_SCHEMA,
+  {name: 'step', selector: {number: {min: 1, max: 50, step: 1, mode: 'box'}}},
+  { name: 'detail_entity', selector: { entity: {} } },
   { name: 'title', selector: { text: {} } },
   {
     name: '', type: 'grid', schema: [
@@ -4284,6 +4747,9 @@ const SWITCH_SCHEMA = [
   {
     name: 'switches', selector: listOf({
       entity: { required: true, selector: { entity: { domain: SWITCH_DOMAINS } } },
+      detail_entity: { selector: { entity: {} } },
+      ...LIGHT_DETAIL_FIELDS,
+      step: {selector: {number: {min: 1, max: 50, step: 1, mode: 'box'}}},
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
       show_name: { selector: { boolean: {} } },
