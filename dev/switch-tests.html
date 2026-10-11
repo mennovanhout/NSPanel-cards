@@ -1,0 +1,93 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Switch detail target regression tests</title>
+<style>body{margin:0;background:#0b0d10;color:white;font:16px sans-serif}#fixture{width:480px}#result{white-space:pre-wrap}</style>
+<div id="fixture"></div><pre id="result">Running</pre>
+<script src="../dist/nspanel-cards.js"></script>
+<script>
+// Fake HA only: commands and more-info events stay in this page.
+if (!customElements.get('ha-icon')) customElements.define('ha-icon', class extends HTMLElement {});
+const fixture = document.querySelector('#fixture');
+const calls = [], opened = [], results = [];
+const assert = (ok, message) => { if (!ok) throw new Error(message); };
+let card;
+const pause = () => new Promise((resolve) => setTimeout(() => {
+  if (card && card._raf !== null) {
+    cancelAnimationFrame(card._raf); card._raf = null; card._render();
+  }
+  resolve();
+}, 30));
+async function mount(config) {
+  fixture.replaceChildren(); calls.length = 0; opened.length = 0;
+  card = document.createElement('nspanel-switch-card');
+  card.setConfig({haptics: false, ...config});
+  card.addEventListener('hass-more-info', (e) => opened.push(e.detail.entityId));
+  fixture.append(card);
+  card.hass = {states: {
+    'switch.primary': {entity_id:'switch.primary', state:'off', attributes:{}},
+    'input_boolean.secondary': {entity_id:'input_boolean.secondary', state:'on', attributes:{}},
+  }, callService: (domain, service, data) => {calls.push({domain, service, data}); return Promise.resolve();}};
+  await pause();
+}
+function hold(index = 0) {
+  card.shadowRoot.querySelectorAll('.btn')[index].dispatchEvent(
+    new MouseEvent('contextmenu', {bubbles:true, cancelable:true}));
+}
+async function test(name, run) {
+  try {await run(); results.push({name, passed:true});}
+  catch (e) {results.push({name, passed:false, error:e.message});}
+}
+async function run() {
+  await test('shorthand hold uses trimmed target; tap and state keep primary', async () => {
+    await mount({entity:'switch.primary', detail_entity:' light.detail '});
+    hold();
+    assert(opened.join() === 'light.detail' && !calls.length, 'hold routing or no-service contract failed');
+    const button = card.shadowRoot.querySelector('.btn');
+    assert(button.querySelector('.st').textContent === 'Off', 'state does not reflect primary');
+    button.click();
+    assert(calls.length === 1 && calls[0].domain === 'homeassistant' && calls[0].service === 'turn_on' && calls[0].data.entity_id === 'switch.primary', 'tap redirected');
+  });
+  await test('grid detail targets are per entry; top-level target is shorthand only', async () => {
+    await mount({detail_entity:'sensor.ignored', switches:[
+      {entity:'switch.primary', detail_entity:'light.detail'},
+      {entity:'input_boolean.secondary', detail_entity:'sensor.detail'},
+    ]});
+    hold(0); hold(1);
+    assert(opened.join() === 'light.detail,sensor.detail' && !calls.length, 'grid targets not independent');
+    card.shadowRoot.querySelectorAll('.btn')[1].click();
+    assert(calls[0].data.entity_id === 'input_boolean.secondary' && calls[0].service === 'turn_off', 'secondary tap redirected');
+  });
+  for (const target of [undefined, '', '   ', 12]) await test(`default target (${JSON.stringify(target)})`, async () => {
+    await mount({entity:'switch.primary', detail_entity:target}); hold();
+    assert(opened.join() === 'switch.primary' && !calls.length, 'invalid optional target did not fall back');
+  });
+  await test('more_info false disables details while keeping short tap', async () => {
+    await mount({entity:'switch.primary', detail_entity:'light.detail', more_info:false}); hold();
+    assert(!opened.length && !calls.length, 'disabled hold acted');
+    card.shadowRoot.querySelector('.btn').click();
+    assert(calls.length === 1 && calls[0].data.entity_id === 'switch.primary', 'short tap lost');
+  });
+  await test('reconfigured target is used without retaining old handler', async () => {
+    await mount({entity:'switch.primary', detail_entity:'light.first'});
+    card.setConfig({entity:'switch.primary', detail_entity:'sensor.second', haptics:false});
+    await pause(); hold();
+    assert(opened.join() === 'sensor.second' && !calls.length, 'stale target after config change');
+  });
+  await test('visual editor exposes both forms and retains them on edit', () => {
+    assert(SWITCH_SCHEMA.some((r) => r.name === 'detail_entity'), 'missing shorthand field');
+    const list = SWITCH_SCHEMA.find((r) => r.name === 'switches');
+    assert(list.selector.object.fields.detail_entity, 'missing item field');
+    const editor = customElements.get('nspanel-switch-card').getConfigElement();
+    editor.setConfig({type:'custom:nspanel-switch-card', entity:'switch.primary', detail_entity:'light.detail', switches:[{entity:'switch.primary', detail_entity:'sensor.detail'}]});
+    editor._valueChanged({stopPropagation() {}, detail: {value: {title: 'Updated'}}});
+    assert(editor._config.title === 'Updated', 'editor change was not applied');
+    assert(editor._config.detail_entity === 'light.detail' && editor._config.switches[0].detail_entity === 'sensor.detail', 'editor dropped target');
+  });
+  document.querySelector('#result').textContent = JSON.stringify(results, null, 2);
+  document.documentElement.dataset.testStatus = results.every((r) => r.passed) ? 'passed' : 'failed';
+}
+run().catch((e) => {
+  document.documentElement.dataset.testStatus = 'failed';
+  document.querySelector('#result').textContent = e.stack;
+});
+</script>

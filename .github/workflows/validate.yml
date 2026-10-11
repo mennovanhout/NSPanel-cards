@@ -27,3 +27,5 @@ jobs:
         with:
           node-version: 20
       - run: node --check dist/nspanel-cards.js
+      - name: Switch detail target regressions
+        run: python3 dev/check-switch-tests.py

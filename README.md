@@ -497,7 +497,26 @@ greyed out and says so. A long-press opens more-info.
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
-Per switch: `entity`, `name`, `icon`, `show_name`, `show_state`.
+Per switch: `entity`, `detail_entity`, `name`, `icon`, `show_name`, `show_state`.
+`detail_entity` optionally selects a different entity for long-press more-info;
+it is also accepted beside `entity` in the single-switch shorthand. A short tap,
+tile state and availability still use `entity`. Without a non-empty string target,
+details use `entity` as before. `more_info: false` disables details for either target.
+No entity relationship is inferred. The native app opens its matching detail sheet;
+the browser opens Home Assistant more-info. Older bundles ignore this option.
+
+```yaml
+type: custom:nspanel-switch-card
+switches:
+  - entity: switch.extractor_power
+    detail_entity: fan.extractor
+    name: Extractor
+    icon: mdi:fan
+```
+
+Run `python3 dev/check-switch-tests.py --browser /path/to/chromium` to verify
+target routing, unchanged tap commands, fallback values, configuration updates
+and editor support with fake HA.
 
 ### Camera
 
