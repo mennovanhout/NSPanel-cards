@@ -905,12 +905,57 @@ An information page for the same panel:
 
 Not a card: a place in the dashboard to configure the
 [native app](https://github.com/mennovanhout/nspanelpro-flutter)'s screensaver - the photo,
-the wandering clock, the proximity wake. In a browser it renders nothing at all; it is in this
-bundle so Lovelace does not show "custom element doesn't exist" where it sits. Put it at the
-end of a vertical-stack rather than as its own page of a swipe card, or the browser gets a
-blank page. All of its options are documented in the app's README - among them
-`weather: weather.home`, which puts the condition, the temperature and today's chance of
-rain under the screensaver clock.
+the clock, the weather, the backlight going off, the proximity wake. In a browser it renders
+nothing at all; it is in this bundle so Lovelace does not show "custom element doesn't exist"
+where it sits. Put it at the end of a vertical-stack rather than as its own page of a swipe
+card, or the browser gets a blank page.
+
+```yaml
+- type: custom:nspanel-screensaver
+  after: 300
+  image_url: https://fastly.picsum.photos/id/650/440/440.jpg
+  image_fit: cover
+  clock_position: bottom-left
+  clock_size: 80
+  weather: weather.forecast_home
+  sleep: true
+  sleep_after: 1800        # half an hour of picture, then dark
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| **When** | | |
+| `after` | `300` | seconds without a touch before it starts; 10 at the least |
+| **The picture** | | |
+| `image_url` | none (black) | any URL that returns an image; one that returns a random image each time is ideal |
+| `image_refresh` | `600` | seconds between new pictures while it runs; 30 at the least |
+| `image_fit` | `contain` | `contain` shows the whole picture with black around it; `cover` fills the screen and crops |
+| **The clock** | | |
+| `clock` | `true` | `false` hides the time and the date |
+| `clock_position` | `wander` | `wander` moves it every `move_every` seconds; or a fixed spot: `center`, `top-left`, `top`, `top-right`, `left`, `right`, `bottom-left`, `bottom`, `bottom-right` |
+| `move_every` | `60` | seconds between spots while it wanders; 10 at the least |
+| `clock_size` | `64` | height of the digits in px, 24-160; the date, the weather and the panel scale with it |
+| `clock_date` | `true` | the day and date under the time |
+| `frost` | `true` | the frosted panel behind the clock; `false` for the text alone |
+| **Weather** | | |
+| `weather` | none | a `weather.*` entity: the condition and the temperature now, under the date |
+| `weather_forecast` | `true` | with `weather`: today's high and low, and the chance and amount of rain when there is any |
+| **Sleep** | | |
+| `sleep` | `false` | turn the backlight fully off while it runs; walking up or Home Assistant turns it back on |
+| `sleep_after` | `0` | seconds of picture before the backlight goes off; `0` is at once |
+| **Waking up** | | |
+| `wake_on_proximity` | `true` | someone walking up wakes it; touch always does |
+| `proximity_delta` | `12` | how far the sensor must move from its resting level; 15% of that level is the floor, so a panel that rests at 400 needs 60 |
+| `proximity_below` | none | wake when the reading drops below this, instead of the learned level |
+| `proximity_above` | none | wake when the reading rises above this, instead of the learned level |
+
+`after`, `sleep`, `sleep_after` and `proximity_delta` can also be set per panel from its device
+page in Home Assistant (**Idle timeout**, **Sleep**, **Sleep after**, **Wake sensitivity**);
+what is set there wins over this card for that one panel.
+
+How the proximity wake learns its resting level, and why sleep is a real backlight-off rather
+than brightness 0, is in the
+[app's README](https://github.com/mennovanhout/nspanelpro-flutter#screensaver).
 
 ## The native app
 
