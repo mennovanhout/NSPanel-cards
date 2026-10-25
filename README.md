@@ -110,7 +110,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.11.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -764,10 +764,11 @@ title: Amsterdam
 height: 288
 forecast_type: daily
 forecast_count: 4
+show_precipitation: true
 ```
 
 </td>
-<td><img src="docs/images/sky.png" alt="A weather card showing 14 degrees, partly cloudy, with a four-day forecast strip, above a clock card reading 22:20" width="300"></td>
+<td><img src="docs/images/sky.png" alt="A weather card showing 14 degrees, partly cloudy, with a four-day forecast strip and the chance and amount of rain under each day, above a clock card reading 22:20" width="300"></td>
 </tr>
 </table>
 
@@ -775,6 +776,24 @@ Since Home Assistant 2024.4 a forecast is a websocket subscription rather than a
 so the card subscribes itself and drops the subscription when it leaves the DOM. On a core old
 enough not to have that command it falls back to the entity's `forecast` attribute. Set
 `show_forecast: false` for current conditions only.
+
+`show_precipitation: true` puts the rain under each hour or day: the chance and the amount,
+`80% · 1.2 mm`, in blue when it is worth noticing - a chance of 30% or more, or any rain at
+all - and grey when it is dry. Both come from the weather provider; most send them (Met.no,
+the default, does, hourly and daily), and a provider that sends neither shows a dash. The line
+needs about 20 px, so give the card a little more `height` than before.
+
+| Option | Default | |
+| --- | --- | --- |
+| `show_forecast` | `true` | the forecast strip |
+| `forecast_type` | `daily` | or `hourly` |
+| `forecast_count` | `4` | 1-5 entries |
+| `show_precipitation` | `false` | chance and amount of rain under each entry |
+
+**Home Assistant's own weather card works on the panel too.** The native app draws
+`type: weather-forecast` as this card - `entity`, `name`, `show_forecast`, `forecast_type`
+and `forecast_slots` carry over - so a dashboard that already has one needs no rewrite there,
+and `show_precipitation: true` works on it as well.
 
 ### Clock
 
@@ -889,7 +908,9 @@ Not a card: a place in the dashboard to configure the
 the wandering clock, the proximity wake. In a browser it renders nothing at all; it is in this
 bundle so Lovelace does not show "custom element doesn't exist" where it sits. Put it at the
 end of a vertical-stack rather than as its own page of a swipe card, or the browser gets a
-blank page. All of its options are documented in the app's README.
+blank page. All of its options are documented in the app's README - among them
+`weather: weather.home`, which puts the condition, the temperature and today's chance of
+rain under the screensaver clock.
 
 ## The native app
 

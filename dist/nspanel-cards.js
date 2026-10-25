@@ -45,7 +45,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.11.0';
+const NSPANEL_VERSION = '0.12.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1398,6 +1398,13 @@ const INFO_CSS = `
 .fc ha-icon { --mdc-icon-size: 22px; margin: 2px 0; }
 .fc .dt { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .fc .dt span { font-weight: 500; opacity: .55; margin-left: 2px; }
+/* the rain under the temperature: blue when it is worth noticing */
+.fc .dr {
+  margin-top: 3px; font-size: 12px; font-weight: 600; line-height: 14px;
+  color: var(--ns-muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fc .dr.wet { color: #7cc4ff; }
 `;
 
 /* Icons by device_class, so a sensor card with no icon still looks like the
@@ -3415,11 +3422,26 @@ const CONDITION_LABELS = {
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/* The rain in one forecast entry, as short as a tile allows: "80% · 1.2 mm",
+   "40%", "0.4 mm". Null when the provider sends neither. `wet` is worth
+   noticing: a real chance, or any amount at all. The app has the same
+   function (lib/util/weather.dart); keep them saying the same thing. */
+function rainOf(f, unit) {
+  const prob = typeof f.precipitation_probability === 'number' ? f.precipitation_probability : null;
+  const amount = typeof f.precipitation === 'number' ? f.precipitation : null;
+  if (prob === null && amount === null) return null;
+  const parts = [];
+  if (prob !== null) parts.push(`${Math.round(prob)}%`);
+  if (amount !== null && amount > 0) parts.push(`${fmt(amount, amount < 10 ? 1 : 0)} ${unit}`);
+  if (!parts.length) parts.push(`0 ${unit}`);
+  return { text: parts.join(' \u00b7 '), wet: (prob || 0) >= 30 || (amount || 0) > 0 };
+}
+
 class NsPanelWeatherCard extends NsInfoCard {
   static get cardType() { return 'nspanel-weather-card'; }
   static get accent() { return '#7cc4ff'; }
   static get defaultOptions() {
-    return { show_forecast: true, forecast_type: 'daily', forecast_count: 4 };
+    return { show_forecast: true, forecast_type: 'daily', forecast_count: 4, show_precipitation: false };
   }
 
   static getStubConfig(hass) {
@@ -3536,16 +3558,17 @@ class NsPanelWeatherCard extends NsInfoCard {
     }
     this._elSub.textContent = broken ? 'Unavailable' : bits.join(' · ');
 
-    this._renderForecast(unit);
+    this._renderForecast(unit, a.precipitation_unit || 'mm');
   }
 
   /* The forecast rebuilds only when the data actually changes - it arrives on
      its own subscription, not with every hass update, but a repaint per state
      change would still be wasteful. */
-  _renderForecast(unit) {
+  _renderForecast(unit, rainUnit) {
     const list = this._config.show_forecast ? this._forecastList() : [];
+    const rainy = !!this._config.show_precipitation;
     const stamp = JSON.stringify(list.map((f) => [f.datetime, f.condition,
-      f.temperature, f.templow]));
+      f.temperature, f.templow, rainy && f.precipitation, rainy && f.precipitation_probability]));
     if (stamp === this._fcShown) return;
     this._fcShown = stamp;
 
@@ -3565,6 +3588,13 @@ class NsPanelWeatherCard extends NsInfoCard {
         `<div class="dd">${label}</div>` +
         `<ha-icon icon="${WEATHER_ICONS[f.condition] || 'mdi:weather-cloudy'}"></ha-icon>` +
         `<div class="dt">${fmt(f.temperature, 0)}${unit === '%' ? '' : ''}${low}</div>`;
+      if (rainy) {
+        const r = rainOf(f, rainUnit);
+        const el = document.createElement('div');
+        el.className = 'dr' + (r && r.wet ? ' wet' : '');
+        el.textContent = r ? r.text : '\u2013';
+        d.appendChild(el);
+      }
       this._elFc.appendChild(d);
     });
   }
@@ -3843,6 +3873,7 @@ const EDITOR_LABELS = {
   on_text: 'Text while on',
   off_text: 'Text while off',
   show_name: 'Show names',
+  show_precipitation: 'Show the chance and amount of rain',
   show_state: 'Show the state line',
   interval: 'Seconds between pictures',
   fit: 'Picture fit',
@@ -4148,6 +4179,7 @@ const WEATHER_SCHEMA = INFO_SCHEMA.concat([
       { name: 'forecast_count', selector: { number: { min: 1, max: 5, step: 1, mode: 'box' } } },
     ],
   },
+  { name: 'show_precipitation', selector: { boolean: {} } },
 ]);
 
 const CLOCK_SCHEMA = [
