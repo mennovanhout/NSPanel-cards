@@ -45,7 +45,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.12.0';
+const NSPANEL_VERSION = '0.12.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1401,7 +1401,7 @@ const INFO_CSS = `
 /* the rain under the temperature: blue when it is worth noticing */
 .fc .dr {
   margin-top: 3px; font-size: 12px; font-weight: 600; line-height: 14px;
-  color: var(--ns-muted); font-variant-numeric: tabular-nums;
+  color: var(--ns-muted); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fc .dr.wet { color: #7cc4ff; }
@@ -3422,8 +3422,8 @@ const CONDITION_LABELS = {
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/* The rain in one forecast entry, as short as a tile allows: "80% · 1.2 mm",
-   "40%", "0.4 mm". Null when the provider sends neither. `wet` is worth
+/* The rain in one forecast entry, as short as a tile allows: "80% · 1.2mm",
+   "3% · 0mm", "40%". Null when the provider sends neither. `wet` is worth
    noticing: a real chance, or any amount at all. The app has the same
    function (lib/util/weather.dart); keep them saying the same thing. */
 function rainOf(f, unit) {
@@ -3432,8 +3432,10 @@ function rainOf(f, unit) {
   if (prob === null && amount === null) return null;
   const parts = [];
   if (prob !== null) parts.push(`${Math.round(prob)}%`);
-  if (amount !== null && amount > 0) parts.push(`${fmt(amount, amount < 10 ? 1 : 0)} ${unit}`);
-  if (!parts.length) parts.push(`0 ${unit}`);
+  // the amount whenever it is known, dry hours too: the chance alone cannot
+  // tell a drizzle from a downpour. No space before the unit: five tiles
+  // across leave ~73 px, and "100% · 12 mm" needs 77.
+  if (amount !== null) parts.push(amount > 0 ? `${fmt(amount, amount < 10 ? 1 : 0)}${unit}` : `0${unit}`);
   return { text: parts.join(' \u00b7 '), wet: (prob || 0) >= 30 || (amount || 0) > 0 };
 }
 

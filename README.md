@@ -110,7 +110,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.1`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -778,9 +778,11 @@ enough not to have that command it falls back to the entity's `forecast` attribu
 `show_forecast: false` for current conditions only.
 
 `show_precipitation: true` puts the rain under each hour or day: the chance and the amount,
-`80% · 1.2 mm`, in blue when it is worth noticing - a chance of 30% or more, or any rain at
-all - and grey when it is dry. Both come from the weather provider; most send them (Met.no,
-the default, does, hourly and daily), and a provider that sends neither shows a dash. The line
+`80% · 1.2mm`, so a drizzle and a downpour look different. The amount is there for dry hours
+too (`3% · 0mm`). It is blue when it is worth noticing - a chance of 30% or more, or any rain
+at all - and grey when it is dry. Both come from the weather provider; most send them (Met.no,
+the default, does, hourly and daily). A provider that sends only one shows that one, and one
+that sends neither shows a dash. The line
 needs about 20 px, so give the card a little more `height` than before.
 
 | Option | Default | |
