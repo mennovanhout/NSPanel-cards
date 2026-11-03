@@ -751,6 +751,10 @@ With `only_problems: true` the card shows nothing but what is wrong, and an all-
 there is nothing — which makes it the fastest card on the panel to read. `columns` takes 1, 2
 or 3 across, the same as the button card; `all_clear` sets the text.
 
+Each row of tiles is 62 px plus a 10 px gap, inside the card's padding, so a 240 px card holds
+three rows: six entities at two across. Tiles that do not fit are cut off at the card's edge,
+so give the card more `height`, a third column, or `only_problems: true` for a long list.
+
 ### Weather
 
 <table>
