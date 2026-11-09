@@ -1129,7 +1129,8 @@ show_presets: false
 
 ## Licence
 
-MIT
+MIT, Copyright (c) 2026 Menno van Hout. You can use, change and share this freely, including
+commercially, as long as the copyright notice and the [LICENSE](LICENSE) stay with every copy.
 
 ### Light regression tests
 
