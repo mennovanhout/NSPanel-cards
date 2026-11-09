@@ -33,6 +33,21 @@ function hold(index = 0) {
   card.shadowRoot.querySelectorAll('.btn')[index].dispatchEvent(
     new MouseEvent('contextmenu', {bubbles:true, cancelable:true}));
 }
+function pointer(button, kind, x = 20, y = 20) {
+  button.dispatchEvent(new PointerEvent(kind, {
+    bubbles:true, pointerId:1, isPrimary:true, button:0, clientX:x, clientY:y,
+  }));
+}
+function tap(button) {
+  pointer(button, 'pointerdown'); pointer(button, 'pointerup');
+  button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+}
+async function longPress(button) {
+  pointer(button, 'pointerdown');
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  pointer(button, 'pointerup');
+  button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+}
 async function test(name, run) {
   try {await run(); results.push({name, passed:true});}
   catch (e) {results.push({name, passed:false, error:e.message});}
@@ -83,6 +98,113 @@ async function run() {
     editor._valueChanged({stopPropagation() {}, detail: {value: {title: 'Updated'}}});
     assert(editor._config.title === 'Updated', 'editor change was not applied');
     assert(editor._config.detail_entity === 'light.detail' && editor._config.switches[0].detail_entity === 'sensor.detail', 'editor dropped target');
+  });
+  await test('swapped switch tap opens detail once; hold powers primary once', async () => {
+    await mount({entity:'switch.primary', detail_entity:' light.detail ', swap_press_actions:true});
+    const button = card.shadowRoot.querySelector('.btn');
+    tap(button);
+    assert(card._lightDialog?.config.entity === 'light.detail' && !calls.length, 'swapped tap did not open only detail');
+    sheet().close(); opened.length = 0;
+    pointer(button, 'pointerdown');
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    pointer(button, 'pointerup');
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    button.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, cancelable:true}));
+    assert(!opened.length && calls.length === 1 && calls[0].data.entity_id === 'switch.primary', 'hold fired twice or changed target');
+  });
+  await test('item override chooses tap and hold independently', async () => {
+    await mount({swap_press_actions:true, switches:[
+      {entity:'switch.primary', detail_entity:'light.detail', swap_press_actions:false},
+      {entity:'input_boolean.secondary', detail_entity:'sensor.detail'},
+    ]});
+    const buttons = card.shadowRoot.querySelectorAll('.btn');
+    tap(buttons[0]); tap(buttons[1]);
+    assert(calls.length === 1 && calls[0].data.entity_id === 'switch.primary', 'false override did not power');
+    assert(opened.join() === 'sensor.detail', 'inherited swap did not open detail');
+    await longPress(buttons[0]);
+    assert(opened.join() === 'sensor.detail' && card._lightDialog?.config.entity === 'light.detail', 'false override hold did not open detail');
+    sheet().close();
+  });
+  await test('swapped detail can be disabled without losing power', async () => {
+    await mount({entity:'switch.primary', more_info:false, swap_press_actions:true});
+    const button = card.shadowRoot.querySelector('.btn');
+    tap(button); await longPress(button);
+    assert(!opened.length && calls.length === 1, 'disabled detail or swapped power failed');
+  });
+  await test('swipe cancellation and unavailable switch send no commands', async () => {
+    await mount({entity:'switch.primary', swap_press_actions:true});
+    const button = card.shadowRoot.querySelector('.btn');
+    pointer(button, 'pointerdown'); pointer(button, 'pointermove', 50, 20);
+    pointer(button, 'pointerup', 50, 20);
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    assert(!opened.length && !calls.length, 'swipe was treated as tap');
+    card.hass = {states:{'switch.primary':{entity_id:'switch.primary',state:'unavailable',attributes:{}}}, callService:(...args) => calls.push(args)};
+    await pause();
+    tap(card.shadowRoot.querySelector('.btn'));
+    assert(!opened.length && !calls.length, 'unavailable switch acted');
+  });
+  await test('swapped light tap and hold use their configured actions', async () => {
+    fixture.replaceChildren(); calls.length = 0;
+    const light = document.createElement('nspanel-light-card');
+    light.setConfig({entity:'light.test', swap_press_actions:true, long_press_ms:30, haptics:false});
+    fixture.append(light);
+    light.hass = {states:{'light.test':{entity_id:'light.test',state:'off',attributes:{supported_color_modes:['onoff']}}}, callService:(domain, service, data) => calls.push({domain, service, data})};
+    let sheets = 0;
+    light._openSheet = () => { sheets++; };
+    const event = (kind) => ({pointerId:1, button:0, clientX:20, clientY:20});
+    light._onDown(event('down')); light._onUp(event('up'));
+    assert(sheets === 1 && !calls.length, 'swapped light tap did not open detail');
+    light._onDown(event('down'));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    light._onUp(event('up'));
+    assert(sheets === 1 && calls.length === 1 && calls[0].service === 'toggle', 'swapped light hold did not toggle once');
+    light.setConfig({entity:'light.test', swap_press_actions:true, long_press:'none', long_press_ms:30, haptics:false});
+    light._onDown(event('down')); light._onUp(event('up'));
+    assert(sheets === 1 && calls.length === 1, 'disabled light detail acted');
+    light._onDown(event('down')); light._onCancel(); light._onUp(event('up'));
+    assert(calls.length === 1, 'cancelled light press acted');
+    light.hass = {states:{'light.test':{entity_id:'light.test',state:'unavailable',attributes:{}}}, callService:(...args) => calls.push(args)};
+    light._onDown(event('down')); light._onUp(event('up'));
+    assert(calls.length === 1, 'unavailable light acted');
+  });
+  await test('a switch in state unknown still works', async () => {
+    await mount({switches:['switch.primary']});
+    card.hass = {states:{'switch.primary':{entity_id:'switch.primary', state:'unknown', attributes:{}}},
+      callService:(domain, service, data) => {calls.push({domain, service, data}); return Promise.resolve();}};
+    await pause();
+    const button = card.shadowRoot.querySelector('.btn');
+    assert(!button.hasAttribute('disabled'), 'unknown tile drawn disabled');
+    pointer(button, 'pointerdown'); pointer(button, 'pointerup');
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    assert(calls.length === 1 && calls[0].service === 'turn_on', 'unknown switch ignored the tap');
+  });
+  await test('right-click opens details after an earlier tap', async () => {
+    await mount({switches:['switch.primary']});
+    const button = card.shadowRoot.querySelector('.btn');
+    pointer(button, 'pointerdown'); pointer(button, 'pointerup');
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    button.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:2, isPrimary:true, button:2, clientX:20, clientY:20}));
+    button.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, cancelable:true, button:2}));
+    assert(opened.length === 1 && opened[0] === 'switch.primary', 'right-click after a tap did nothing');
+  });
+  await test('a hold with long_press none gives no haptic', async () => {
+    fixture.replaceChildren();
+    const light = document.createElement('nspanel-light-card');
+    light.setConfig({entity:'light.test', long_press:'none', long_press_ms:10});
+    fixture.append(light);
+    light.hass = {states:{'light.test':{entity_id:'light.test',state:'on',attributes:{supported_color_modes:['brightness'],brightness:128}}}, callService:() => {}};
+    const felt = [];
+    light._haptic = (k) => felt.push(k);
+    light._onDown({pointerId:1, button:0, clientX:20, clientY:20});
+    await new Promise((r) => setTimeout(r, 40));
+    assert(!felt.includes('medium'), 'a hold that does nothing buzzed');
+    light._onCancel();
+  });
+  await test('editor exposes swap at card and switch item level', () => {
+    assert(LIGHT_SCHEMA.some((r) => r.name === 'swap_press_actions'), 'light field missing');
+    assert(SWITCH_SCHEMA.some((r) => r.name === 'swap_press_actions'), 'switch field missing');
+    const list = SWITCH_SCHEMA.find((r) => r.name === 'switches');
+    assert(list.selector.object.fields.swap_press_actions, 'switch item field missing');
   });
   document.querySelector('#result').textContent = JSON.stringify(results, null, 2);
   document.documentElement.dataset.testStatus = results.every((r) => r.passed) ? 'passed' : 'failed';

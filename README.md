@@ -110,7 +110,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.11.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.1`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -789,6 +789,10 @@ With `only_problems: true` the card shows nothing but what is wrong, and an all-
 there is nothing — which makes it the fastest card on the panel to read. `columns` takes 1, 2
 or 3 across, the same as the button card; `all_clear` sets the text.
 
+Each row of tiles is 62 px plus a 10 px gap, inside the card's padding, so a 240 px card holds
+three rows: six entities at two across. Tiles that do not fit are cut off at the card's edge,
+so give the card more `height`, a third column, or `only_problems: true` for a long list.
+
 ### Weather
 
 <table>
@@ -802,10 +806,11 @@ title: Amsterdam
 height: 288
 forecast_type: daily
 forecast_count: 4
+show_precipitation: true
 ```
 
 </td>
-<td><img src="docs/images/sky.png" alt="A weather card showing 14 degrees, partly cloudy, with a four-day forecast strip, above a clock card reading 22:20" width="300"></td>
+<td><img src="docs/images/sky.png" alt="A weather card showing 14 degrees, partly cloudy, with a four-day forecast strip and the chance and amount of rain under each day, above a clock card reading 22:20" width="300"></td>
 </tr>
 </table>
 
@@ -813,6 +818,26 @@ Since Home Assistant 2024.4 a forecast is a websocket subscription rather than a
 so the card subscribes itself and drops the subscription when it leaves the DOM. On a core old
 enough not to have that command it falls back to the entity's `forecast` attribute. Set
 `show_forecast: false` for current conditions only.
+
+`show_precipitation: true` puts the rain under each hour or day: the chance and the amount,
+`80% · 1.2mm`, so a drizzle and a downpour look different. The amount is there for dry hours
+too (`3% · 0mm`). It is blue when it is worth noticing - a chance of 30% or more, or any rain
+at all - and grey when it is dry. Both come from the weather provider; most send them (Met.no,
+the default, does, hourly and daily). A provider that sends only one shows that one, and one
+that sends neither shows a dash. The line
+needs about 20 px, so give the card a little more `height` than before.
+
+| Option | Default | |
+| --- | --- | --- |
+| `show_forecast` | `true` | the forecast strip |
+| `forecast_type` | `daily` | or `hourly` |
+| `forecast_count` | `4` | 1-5 entries |
+| `show_precipitation` | `false` | chance and amount of rain under each entry |
+
+**Home Assistant's own weather card works on the panel too.** The native app draws
+`type: weather-forecast` as this card - `entity`, `name`, `show_forecast`, `forecast_type`
+and `forecast_slots` carry over - so a dashboard that already has one needs no rewrite there,
+and `show_precipitation: true` works on it as well.
 
 ### Clock
 
@@ -924,10 +949,57 @@ An information page for the same panel:
 
 Not a card: a place in the dashboard to configure the
 [native app](https://github.com/mennovanhout/nspanelpro-flutter)'s screensaver - the photo,
-the wandering clock, the proximity wake. In a browser it renders nothing at all; it is in this
-bundle so Lovelace does not show "custom element doesn't exist" where it sits. Put it at the
-end of a vertical-stack rather than as its own page of a swipe card, or the browser gets a
-blank page. All of its options are documented in the app's README.
+the clock, the weather, the backlight going off, the proximity wake. In a browser it renders
+nothing at all; it is in this bundle so Lovelace does not show "custom element doesn't exist"
+where it sits. Put it at the end of a vertical-stack rather than as its own page of a swipe
+card, or the browser gets a blank page.
+
+```yaml
+- type: custom:nspanel-screensaver
+  after: 300
+  image_url: https://fastly.picsum.photos/id/650/440/440.jpg
+  image_fit: cover
+  clock_position: bottom-left
+  clock_size: 80
+  weather: weather.forecast_home
+  sleep: true
+  sleep_after: 1800        # half an hour of picture, then dark
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| **When** | | |
+| `after` | `300` | seconds without a touch before it starts; 10 at the least |
+| **The picture** | | |
+| `image_url` | none (black) | any URL that returns an image; one that returns a random image each time is ideal |
+| `image_refresh` | `600` | seconds between new pictures while it runs; 30 at the least |
+| `image_fit` | `contain` | `contain` shows the whole picture with black around it; `cover` fills the screen and crops |
+| **The clock** | | |
+| `clock` | `true` | `false` hides the time and the date |
+| `clock_position` | `wander` | `wander` moves it every `move_every` seconds; or a fixed spot: `center`, `top-left`, `top`, `top-right`, `left`, `right`, `bottom-left`, `bottom`, `bottom-right` |
+| `move_every` | `60` | seconds between spots while it wanders; 10 at the least |
+| `clock_size` | `64` | height of the digits in px, 24-160; the date, the weather and the panel scale with it |
+| `clock_date` | `true` | the day and date under the time |
+| `frost` | `true` | the frosted panel behind the clock; `false` for the text alone |
+| **Weather** | | |
+| `weather` | none | a `weather.*` entity: the condition and the temperature now, under the date |
+| `weather_forecast` | `true` | with `weather`: today's high and low, and the chance and amount of rain when there is any |
+| **Sleep** | | |
+| `sleep` | `false` | turn the backlight fully off while it runs; walking up or Home Assistant turns it back on |
+| `sleep_after` | `0` | seconds of picture before the backlight goes off; `0` is at once |
+| **Waking up** | | |
+| `wake_on_proximity` | `true` | someone walking up wakes it; touch always does |
+| `proximity_delta` | `12` | how far the sensor must move from its resting level; 15% of that level is the floor, so a panel that rests at 400 needs 60 |
+| `proximity_below` | none | wake when the reading drops below this, instead of the learned level |
+| `proximity_above` | none | wake when the reading rises above this, instead of the learned level |
+
+`after`, `sleep`, `sleep_after` and `proximity_delta` can also be set per panel from its device
+page in Home Assistant (**Idle timeout**, **Sleep**, **Sleep after**, **Wake sensitivity**);
+what is set there wins over this card for that one panel.
+
+How the proximity wake learns its resting level, and why sleep is a real backlight-off rather
+than brightness 0, is in the
+[app's README](https://github.com/mennovanhout/nspanelpro-flutter#screensaver).
 
 ## The native app
 
@@ -1037,6 +1109,24 @@ because Android System WebView updates through the Play Store and a panel that h
 one is still a panel this has to work on — but if your own probe reports a recent WebView, the
 card is not what is holding your dashboard back.
 
+### Swap tap and hold actions
+
+Light cards and switch cards support `swap_press_actions: true` (default
+`false`). Tap opens details; hold performs the usual power action exactly once.
+For a switch list, each entry may override the card setting with a boolean.
+`detail_entity` still selects only the detail target; power uses the original
+entity. Light `long_press: none` and switch `more_info: false` still disable
+only the detail action, including when it moves to tap. Dragging and presets
+keep their existing actions. Unavailable devices cannot send power commands.
+
+```yaml
+type: custom:nspanel-light-card
+entity: light.example
+swap_press_actions: true
+long_press: sheet
+show_presets: false
+```
+
 ## Licence
 
 MIT
@@ -1059,8 +1149,11 @@ its shared light dialog. Dimmable, tunable-white and colour lights use the same
 layout: tall unlabelled tracks, brightness on the right, then large +/− buttons.
 Horizontal shadow markers show positions. Only brightness shows a percentage; temperature
 and hue/saturation remain available to accessibility tools without visible scales.
-The brightness fill previews the target colour. Card and action accents continue
-to follow `accent` / `follow_color`.
+The brightness fill previews the target colour, including remembered values while
+off. The power button is neutral while off and uses a readable tint of the target
+colour while on. An explicit `accent` still wins for the on-state action;
+`follow_color: false` retains its default accent. Card colours and effect selection
+accents keep their existing behaviour.
 
 ```yaml
 type: custom:nspanel-light-card
