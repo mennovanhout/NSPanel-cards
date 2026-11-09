@@ -951,6 +951,7 @@ card, or the browser gets a blank page.
 | `sleep_after` | `0` | seconds of picture before the backlight goes off; `0` is at once |
 | **Waking up** | | |
 | `wake_on_proximity` | `true` | someone walking up wakes it; touch always does |
+| `keep_awake_on_proximity` | `false` | also hold the screensaver off while someone is near; off, walking past changes nothing |
 | `proximity_delta` | `12` | how far the sensor must move from its resting level; 15% of that level is the floor, so a panel that rests at 400 needs 60 |
 | `proximity_below` | none | wake when the reading drops below this, instead of the learned level |
 | `proximity_above` | none | wake when the reading rises above this, instead of the learned level |
