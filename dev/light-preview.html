@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Light controls — simulated preview</title>
+<style>html,body{margin:0;background:#0b0d10;font:16px Roboto,system-ui,sans-serif;color:#f2f4f7}</style>
+<script src="../kiosk/icons.js"></script>
+<script src="../dist/nspanel-cards.js"></script>
+<body><script>
+// Isolated preview: all service calls stay here; there is no HA connection.
+const params = new URLSearchParams(location.search);
+const mode = params.get('mode') || 'rgb';
+const calls = [];
+const attributes = {
+  friendly_name: {dimmer:'Dimmer',tw:'Tunable white',rgb:'RGB light'}[mode],
+  supported_color_modes: mode === 'dimmer' ? ['brightness'] : mode === 'tw' ? ['color_temp'] : ['rgb','color_temp'],
+  min_color_temp_kelvin: 2000, max_color_temp_kelvin: 6500,
+  supported_features: 4, effect_list: ['Solid','Rainbow','Breathe','Candle','Twinkle','Fire Flicker'],
+};
+let current = {entity_id:'light.preview',state:'on',attributes:{...attributes,
+  brightness:128,color_mode:mode === 'tw' ? 'color_temp' : mode === 'dimmer' ? 'brightness' : 'hs',
+  hs_color:[180,70],color_temp_kelvin:3500,effect:'Rainbow'}};
+const card = document.createElement('nspanel-light-card');
+card.setConfig({entity:'light.preview',height:480,haptics:false,step_target:'last_used',
+  effect_favorites:attributes.effect_list.map(effect=>({effect}))});
+document.body.append(card);
+function publish() {
+  card.hass = {connection:{connected:true,_url:'ws://light-preview-'+mode+'/api/websocket'},
+    states:{'light.preview':structuredClone(current)},
+    callService:async(domain,service,data)=>{
+      calls.push({domain,service,data});
+      if(window.refuse) throw Error('Simulated refusal');
+      current.state=service==='turn_off'?'off':'on';
+      if('brightness_pct' in data) current.attributes.brightness=Math.round(data.brightness_pct*2.55);
+      for(const key of ['hs_color','color_temp_kelvin','effect']) if(key in data) current.attributes[key]=data[key];
+      if('hs_color' in data) current.attributes.color_mode='hs';
+      if('color_temp_kelvin' in data) current.attributes.color_mode='color_temp';
+      setTimeout(publish,0);
+    }};
+}
+function missingOff() {
+  current={entity_id:'light.preview',state:'off',attributes:{...attributes,
+    brightness:null,color_mode:null,hs_color:null,color_temp_kelvin:null,effect:null}};
+  publish();
+}
+if(params.get('state')==='off') missingOff(); else publish();
+setTimeout(()=>card._openSheet(),100);
+</script></body></html>
