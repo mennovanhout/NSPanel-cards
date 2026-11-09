@@ -1,0 +1,169 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Card regression tests</title>
+<style>body{margin:0;background:#0b0d10;color:white;font:16px sans-serif}#fixture{width:480px}#result{white-space:pre-wrap}</style>
+<div id="fixture"></div><pre id="result">Running</pre>
+<script src="../dist/nspanel-cards.js"></script>
+<script>
+// Fake HA only: commands and more-info events stay in this page.
+if (!customElements.get('ha-icon')) customElements.define('ha-icon', class extends HTMLElement {});
+const fixture = document.querySelector('#fixture');
+const calls = [], opened = [], results = [];
+const assert = (ok, message) => { if (!ok) throw new Error(message); };
+let card;
+// Headless virtual time does not run animation frames, so finish a pending render by hand.
+const wait = (ms) => new Promise((resolve) => setTimeout(() => {
+  if (card && card._raf !== null && card._raf !== undefined) {
+    cancelAnimationFrame(card._raf); card._raf = null; card._render();
+  }
+  resolve();
+}, ms));
+const STATES = {
+  'media_player.m': {entity_id:'media_player.m', state:'playing', attributes:{friendly_name:'Radio', volume_level:.4, supported_features:16437}},
+  'climate.c': {entity_id:'climate.c', state:'heat', attributes:{friendly_name:'Hall', temperature:21.5, min_temp:7, max_temp:35, current_temperature:20, hvac_modes:['off','heat']}},
+  'script.s': {entity_id:'script.s', state:'off', attributes:{friendly_name:'Go'}},
+  'binary_sensor.leak': {entity_id:'binary_sensor.leak', state:'on', attributes:{friendly_name:'Leak'}},
+  'binary_sensor.door': {entity_id:'binary_sensor.door', state:'off', attributes:{friendly_name:'Door'}},
+};
+async function mount(tag, config) {
+  if (typeof _sheet !== 'undefined' && _sheet && _sheet.parentNode) _sheet.remove();
+  fixture.replaceChildren(); calls.length = 0; opened.length = 0;
+  card = document.createElement(tag);
+  card.setConfig({haptics: false, ...config});
+  card.addEventListener('hass-more-info', (e) => opened.push(e.detail.entityId));
+  fixture.append(card);
+  card.hass = {states: STATES, callService: (domain, service, data) => {calls.push(service); return Promise.resolve();}};
+  await wait(40);
+}
+const sheetOpen = () => !!sheet().parentNode && sheet()._wrap.classList.contains('in');
+async function test(name, run) {
+  try {await run(); results.push({name, passed:true});}
+  catch (e) {results.push({name, passed:false, error:e.message});}
+}
+async function run() {
+  await test('a zero channel stays zero', () => {
+    assert(tintStops('#0000ff').weak === 'rgba(0,0,255,.34)', tintStops('#0000ff').weak);
+    assert(tintStops('#ff0000').weak === 'rgba(255,0,0,.34)', tintStops('#ff0000').weak);
+    assert(tintStops('#000').weak === 'rgba(0,0,0,.34)', tintStops('#000').weak);
+    assert(tintStops('b74093').weak === 'rgba(183,64,147,.34)', tintStops('b74093').weak);
+  });
+  await test('rubbish still falls back to the default tint', () => {
+    assert(tintStops('nope').weak === 'rgba(255,183,74,.34)', tintStops('nope').weak);
+  });
+  await test('a hex without # becomes a colour; names are left alone', () => {
+    assert(cssColor('b74093') === '#b74093', cssColor('b74093'));
+    assert(cssColor('#b74093') === '#b74093', cssColor('#b74093'));
+    assert(cssColor('fff') === '#fff', cssColor('fff'));
+    assert(cssColor('red') === 'red', cssColor('red'));
+  });
+  await test('button colour without # reaches the label', async () => {
+    await mount('nspanel-button-card', {buttons:[{entity:'script.s', color:'b74093'}]});
+    const btn = card.shadowRoot.querySelector('.btn');
+    assert(btn.style.getPropertyValue('--ns-accent') === '#b74093', btn.style.getPropertyValue('--ns-accent'));
+  });
+  await test('climate sheet shows degrees while the others keep percent', async () => {
+    await mount('nspanel-climate-card', {entity:'climate.c'});
+    card._openSheet();
+    await wait(30);
+    assert(sheet()._tval.textContent === '21.5°', sheet()._tval.textContent);
+    sheet().setValue(0);
+    assert(sheet()._tval.textContent === '7.0°', sheet()._tval.textContent);
+    sheet().close();
+    await mount('nspanel-media-card', {entity:'media_player.m'});
+    card._openSheet();
+    await wait(30);
+    assert(sheet()._tval.textContent === '40%', sheet()._tval.textContent);
+    sheet().close();
+  });
+  await test('a tap that opens the sheet does not close it again', async () => {
+    await mount('nspanel-media-card', {entity:'media_player.m', tap:'sheet'});
+    let closes = 0;
+    const close = sheet().close;
+    sheet().close = function () { closes++; return close.call(this); };
+    card._onTap();
+    await wait(30);
+    sheet()._scrim.click();
+    await wait(30);
+    assert(closes === 0, 'the opening click closed the sheet');
+    await wait(400);
+    sheet()._scrim.click();
+    await wait(30);
+    delete sheet().close;
+    assert(closes === 1, 'a later tap outside should close it');
+  });
+  await test('media tap defaults to play/pause, more_info still means the dialog', async () => {
+    await mount('nspanel-media-card', {entity:'media_player.m'});
+    card._onTap();
+    assert(calls.join() === 'media_play_pause' && !opened.length, 'default tap');
+    await mount('nspanel-media-card', {entity:'media_player.m', more_info:true});
+    card._onTap();
+    assert(!calls.length && opened.join() === 'media_player.m', 'more_info tap');
+  });
+  await test('media tap and long_press take every action, tap beats more_info', async () => {
+    await mount('nspanel-media-card', {entity:'media_player.m', tap:'none', more_info:true});
+    card._onTap();
+    assert(!calls.length && !opened.length, 'tap none');
+    await mount('nspanel-media-card', {entity:'media_player.m', long_press:'more_info'});
+    card._longPress();
+    assert(opened.join() === 'media_player.m' && card._longPressActs(), 'hold more_info');
+    await mount('nspanel-media-card', {entity:'media_player.m', long_press:'play_pause'});
+    card._longPress();
+    assert(calls.join() === 'media_play_pause', 'hold play_pause');
+    await mount('nspanel-media-card', {entity:'media_player.m', long_press:'none'});
+    card._longPress();
+    assert(!calls.length && !opened.length && !card._longPressActs(), 'hold none');
+  });
+  await test('feedback_ms 0 is no tick, per button or on the card', async () => {
+    await mount('nspanel-button-card', {buttons:[
+      {entity:'script.s', name:'a'}, {entity:'script.s', name:'b', feedback_ms:0},
+    ]});
+    const [a, b] = card._btns;
+    card._press(b);
+    await wait(30);
+    assert(!b.fired && !b.el.classList.contains('hot') && calls.length === 1, 'per-button 0 still ticked');
+    card._press(a);
+    await wait(30);
+    assert(a.fired && a.el.classList.contains('hot'), 'the other button lost its tick');
+    await mount('nspanel-button-card', {feedback_ms:0, buttons:[{entity:'script.s'}]});
+    card._press(card._btns[0]);
+    await wait(30);
+    assert(!card._btns[0].fired && calls.length === 1, 'card-level 0 still ticked');
+    await mount('nspanel-button-card', {feedback_ms:0, buttons:[{entity:'script.s', feedback_ms:50}]});
+    card._press(card._btns[0]);
+    assert(card._btns[0].fired, 'a button setting should beat the card');
+    await wait(120);
+    assert(!card._btns[0].fired, 'the per-button time was not used');
+  });
+  await test('status colours show on a problem and stay off a normal tile', async () => {
+    await mount('nspanel-status-card', {entities:[
+      {entity:'binary_sensor.leak', color:'ff5252', background:'#3a1010'},
+      {entity:'binary_sensor.door', color:'#ffd166'},
+    ]});
+    const [leak, door] = card._tiles;
+    await wait(30);
+    assert(leak.el.classList.contains('alert') && !door.el.classList.contains('alert'), 'alert state');
+    assert(getComputedStyle(leak.icon).color === 'rgb(255, 82, 82)', getComputedStyle(leak.icon).color);
+    assert(getComputedStyle(leak.name).color === 'rgb(255, 82, 82)', getComputedStyle(leak.name).color);
+    assert(getComputedStyle(leak.el).backgroundColor === 'rgb(58, 16, 16)', getComputedStyle(leak.el).backgroundColor);
+    assert(getComputedStyle(door.icon).color !== 'rgb(255, 209, 102)', 'a normal tile was coloured');
+    assert(getComputedStyle(door.name).color !== 'rgb(255, 209, 102)', 'a normal name was coloured');
+  });
+  await test('the editors carry the new options', () => {
+    const flat = (rows, out = []) => { rows.forEach((r) => (r.type === 'grid' ? flat(r.schema, out) : out.push(r))); return out; };
+    const media = flat(MEDIA_SCHEMA);
+    assert(media.some((r) => r.name === 'tap'), 'tap');
+    const hold = media.find((r) => r.name === 'long_press');
+    assert(hold.selector.select.options.some((o) => o.value === 'more_info'), 'long_press options');
+    assert(flat(LIGHT_SCHEMA).find((r) => r.name === 'long_press').selector.select.options.length === 2, 'other cards changed');
+    assert(BUTTON_SCHEMA.find((r) => r.name === 'buttons').selector.object.fields.feedback_ms, 'button field');
+    const status = STATUS_SCHEMA.find((r) => r.name === 'entities').selector.object.fields;
+    assert(status.color && status.background, 'status fields');
+  });
+  document.querySelector('#result').textContent = JSON.stringify(results, null, 2);
+  document.documentElement.dataset.testStatus = results.every((r) => r.passed) ? 'passed' : 'failed';
+}
+run().catch((e) => {
+  document.documentElement.dataset.testStatus = 'failed';
+  document.querySelector('#result').textContent = e.stack;
+});
+</script>

@@ -110,7 +110,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.1`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.13.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -291,7 +291,7 @@ presets:
 
 The card fill is **volume**, so the drag gesture that dims a light sets the volume here, and
 the long-press sheet gives you an absolute slider with the same transport buttons. Tap is
-play/pause; set `more_info: true` if you would rather it opened the dialog.
+play/pause and a long-press opens that sheet; `tap` and `long_press` change either one.
 
 Presets on this card are **favourites**, not levels. Each takes a `source` (calls
 `select_source`), a `media_content_id` with optional `media_content_type` (calls `play_media`),
@@ -311,8 +311,13 @@ makes the browser decode it again, and on a media card a render happens on every
 | --- | --- | --- |
 | `show_art` | `true` | album art, else the domain icon |
 | `show_transport` | `true` | previous / play-pause / next |
-| `more_info` | `false` | `true` makes tap open the dialog instead of play/pause |
+| `tap` | `play_pause` | `play_pause`, `sheet` (full-screen control), `more_info` or `none` |
+| `long_press` | `sheet` | takes the same four |
+| `more_info` | `false` | the older spelling of `tap: more_info`; `tap` wins |
 | `presets` | none | favourites: `source`, `media_content_id`, `volume_pct` |
+
+`more_info` opens Home Assistant's dialog in a browser. The native app has no such dialog, so
+there it opens the full-screen control.
 
 ### Buttons
 
@@ -394,7 +399,7 @@ the scene did not do what you expected.
 | `columns` | `2` | 1–3, capped at the number of buttons; a row is always shared by the buttons in it |
 | `confirm` | `false` | ask for a second tap; also settable per button |
 | `confirm_text` | `Tap again` | shown while it waits |
-| `feedback_ms` | `1200` | how long the tick holds |
+| `feedback_ms` | `1200` | how long the tick holds; `0` is no tick at all. Also settable per button, for a switch that answers with its own state |
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
@@ -785,6 +790,21 @@ that is missing, `unavailable` or `unknown` counts too — a sensor that stopped
 exactly the thing you want a wall panel to tell you about. Override it per entity with
 `problem_when: [state, ...]`.
 
+To tell a leak from a window left open, give an entity its own colours. `color` is its icon
+and text and tints the tile, and `background` sets the tile outright. Both are hex, and both
+only show while that entity is a problem, so a normal tile stays quiet:
+
+```yaml
+type: custom:nspanel-status-card
+only_problems: true
+entities:
+  - entity: binary_sensor.leak_kitchen
+    color: "#ff5252"
+  - entity: binary_sensor.window_bedroom
+    color: "#ffd166"
+    background: "#3a3010"
+```
+
 With `only_problems: true` the card shows nothing but what is wrong, and an all-clear when
 there is nothing — which makes it the fastest card on the panel to read. `columns` takes 1, 2
 or 3 across, the same as the button card; `all_clear` sets the text.
@@ -838,6 +858,9 @@ needs about 20 px, so give the card a little more `height` than before.
 `type: weather-forecast` as this card - `entity`, `name`, `show_forecast`, `forecast_type`
 and `forecast_slots` carry over - so a dashboard that already has one needs no rewrite there,
 and `show_precipitation: true` works on it as well.
+
+`style: pro` on this card is a full-screen weather page, drawn by the native app only. A
+browser ignores the key and shows the normal card, so one dashboard works in both.
 
 ### Clock
 

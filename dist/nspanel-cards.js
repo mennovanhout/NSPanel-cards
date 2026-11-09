@@ -47,7 +47,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.12.1';
+const NSPANEL_VERSION = '0.13.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -80,12 +80,25 @@ function haptic(node, kind) {
 
 /* One accent in, two translucent stops out. Kept in JS rather than color-mix()
    because the Chromium 108 baseline predates it. */
+/* YAML makes `#` a comment unless it is quoted, so `b74093` is what often
+   arrives. tintStops reads that fine; as a CSS value it is nothing at all. */
+function cssColor(c) {
+  const v = String(c === null || c === undefined ? '' : c).trim();
+  return /^([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v) ? `#${v}` : v;
+}
+
 function tintStops(hex) {
   const h = String(hex).trim().replace('#', '');
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
-  const r = parseInt(full.slice(0, 2), 16) || 255;
-  const g = parseInt(full.slice(2, 4), 16) || 183;
-  const b = parseInt(full.slice(4, 6), 16) || 74;
+  // Only an unreadable channel falls back: 00 is a value, and `|| 255` turned
+  // #0000ff into pale pink behind a blue label.
+  const channel = (at, fallback) => {
+    const n = parseInt(full.slice(at, at + 2), 16);
+    return Number.isNaN(n) ? fallback : n;
+  };
+  const r = channel(0, 255);
+  const g = channel(2, 183);
+  const b = channel(4, 74);
   return {
     strong: `rgba(${r},${g},${b},.62)`,
     weak: `rgba(${r},${g},${b},.34)`,
@@ -491,6 +504,14 @@ class NsSheet extends HTMLElement {
     this._body.after(this._binaryState);
     this._trackActive = false;
 
+    // Opened from a tap, the sheet is on screen before that tap's click is
+    // delivered, and the click would land on whatever is now under the finger.
+    this.addEventListener('click', (e) => {
+      if (performance.now() - this._openedAt < 350) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, true);
     this.shadowRoot.querySelector('.x').addEventListener('click', () => this.close());
     this._scrim.addEventListener('click', () => this.close());
     this.shadowRoot.querySelector('.up')
@@ -507,6 +528,7 @@ class NsSheet extends HTMLElement {
     clearTimeout(this._closeTimer);
     if (this._opts && this._opts.onClose) this._opts.onClose();
     this._trackActive = false;
+    this._openedAt = performance.now();
     this.update(opts);
 
     const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
@@ -524,7 +546,7 @@ class NsSheet extends HTMLElement {
   update(opts) {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a',
       showLevel: true, enabled: true }, opts);
-    this.style.setProperty('--ns-accent', this._opts.accent);
+    this.style.setProperty('--ns-accent', cssColor(this._opts.accent));
     this._title.textContent = opts.title || '';
     this._state.textContent = opts.state || '';
     this._binaryState.textContent = opts.state || '';
@@ -567,7 +589,8 @@ class NsSheet extends HTMLElement {
   setValue(v) {
     this._value = clamp(v, 0, 1);
     this.style.setProperty('--ns-fill', String(this._value));
-    this._tval.textContent = Math.round(this._value * 100) + '%';
+    const format = this._opts && this._opts.format;
+    this._tval.textContent = format ? format(this._value) : Math.round(this._value * 100) + '%';
   }
 
   close() {
@@ -759,7 +782,7 @@ class NsBaseCard extends HTMLElement {
   }
 
   _accent() {
-    return this._config.accent || this.constructor.accent;
+    return cssColor(this._config.accent || this.constructor.accent);
   }
 
   /* What the card calls the thing. `title` wins, `name` is the older spelling
@@ -1477,6 +1500,7 @@ const INFO_CSS = `
   text-overflow: ellipsis;
 }
 .tile.alert .ts { color: var(--ns-accent); }
+.tile.alert.own .tn { color: var(--ns-accent); }
 .grid[data-cols="3"] .tile { padding: 0 8px; gap: 8px; }
 .grid[data-cols="3"] .tile ha-icon { --mdc-icon-size: 20px; }
 .grid[data-cols="3"] .tile .tn { font-size: 14px; }
@@ -1683,7 +1707,7 @@ class NsInfoCard extends HTMLElement {
 
   _state(id) { return this._hass ? this._hass.states[id] : null; }
 
-  _accent() { return this._config.accent || this.constructor.accent; }
+  _accent() { return cssColor(this._config.accent || this.constructor.accent); }
 
   _title() {
     const s = this._stateObj;
@@ -1816,7 +1840,7 @@ class NsPanelSensorCard extends NsInfoCard {
     const sev = this._severityColour(n);
     if (sev !== this._sevShown) {
       this._sevShown = sev;
-      const accent = sev || this._accent();
+      const accent = sev ? cssColor(sev) : this._accent();
       const tint = tintStops(accent);
       this._card.style.setProperty('--ns-accent', accent);
       this._card.style.setProperty('--ns-fill-strong', tint.strong);
@@ -2164,13 +2188,18 @@ class NsPanelButtonCard extends NsInfoCard {
 
     this._fire(b.item);
 
-    // The acknowledgement. Nothing in the state will confirm this for us.
-    b.fired = true;
-    b.el.classList.add('hot');
-    this._later(() => {
-      b.fired = false;
-      this._scheduleRender();
-    }, this._config.feedback_ms);
+    // The acknowledgement. Nothing in the state will confirm this for us, so
+    // it is on unless asked otherwise: 0 is no tick at all, for a switch that
+    // answers with its own state. Per button, then the card.
+    const ms = Number(b.item.feedback_ms ?? this._config.feedback_ms);
+    if (ms > 0) {
+      b.fired = true;
+      b.el.classList.add('hot');
+      this._later(() => {
+        b.fired = false;
+        this._scheduleRender();
+      }, ms);
+    }
     this._scheduleRender();
   }
 
@@ -2193,7 +2222,7 @@ class NsPanelButtonCard extends NsInfoCard {
       el.className = 'btn' + (this._showName(item) ? '' : ' nolabel');
       // a colour of its own: the lit state uses it instead of the card's accent
       if (item.color) {
-        el.style.setProperty('--ns-accent', String(item.color));
+        el.style.setProperty('--ns-accent', cssColor(item.color));
         el.style.setProperty('--ns-accent-dim', tintStops(item.color).weak);
       }
       el.innerHTML = '<ha-icon></ha-icon><div class="bl"></div>';
@@ -2791,7 +2820,7 @@ class NsKeypad extends HTMLElement {
   /* opts: {title, hint, accent, text, onSubmit(code) -> Promise<bool>} */
   open(opts) {
     this._opts = Object.assign({ hint: 'Enter the code', accent: '#8ddba4', text: false }, opts);
-    this.style.setProperty('--ns-accent', this._opts.accent);
+    this.style.setProperty('--ns-accent', cssColor(this._opts.accent));
     this._title.textContent = this._opts.title || '';
     this._ok.textContent = this._opts.title || 'OK';
     this._wrap.classList.toggle('text', !!this._opts.text);
@@ -2983,6 +3012,15 @@ class NsPanelStatusCard extends NsInfoCard {
     this._tiles = this._items.map((item) => {
       const el = document.createElement('button');
       el.className = 'tile';
+      // Colours of its own, to tell a leak from a window left open. They only
+      // show while the tile is a problem: a normal tile stays quiet.
+      if (item.color) {
+        const own = cssColor(item.color);
+        el.style.setProperty('--ns-accent', own);
+        el.style.setProperty('--ns-accent-dim', tintStops(own).weak);
+        el.classList.add('own');
+      }
+      if (item.background) el.style.setProperty('--ns-accent-dim', cssColor(item.background));
       el.innerHTML = '<ha-icon></ha-icon><div class="tt">' +
         '<div class="tn"></div><div class="ts"></div></div>';
       el.addEventListener('click', () => {
@@ -3202,6 +3240,7 @@ class NsPanelClimateCard extends NsBaseCard {
       value: this._displayValue(),
       accent: this._accent(),
       step: (this._config.step / (this._range().max - this._range().min)) * 100,
+      format: (v) => `${fmt(this._degrees(v), 1)}°`,
       actions: acts,
       onInput: (v) => {
         this._local = v;
@@ -3306,7 +3345,7 @@ class NsPanelMediaCard extends NsBaseCard {
   static get domain() { return 'media_player'; }
   static get accent() { return '#a78bfa'; }
   static get defaultOptions() {
-    return { show_art: true, show_transport: true, more_info: false };
+    return { show_art: true, show_transport: true, more_info: false, tap: null };
   }
 
   static getStubConfig(hass) {
@@ -3350,10 +3389,19 @@ class NsPanelMediaCard extends NsBaseCard {
     this._call('media_player', 'volume_set', { volume_level: Math.round(v * 100) / 100 });
   }
 
-  _onTap() {
-    if (this._config.more_info) { moreInfo(this, this._config.entity); return; }
-    this._call('media_player', 'media_play_pause');
+  /* `tap` says what a tap does; without it `more_info: true` keeps the meaning
+     it always had. `long_press` takes the same words. */
+  _runAction(action) {
+    if (action === 'more_info') moreInfo(this, this._config.entity);
+    else if (action === 'play_pause') this._call('media_player', 'media_play_pause');
+    else if (action === 'sheet') this._openSheet();
   }
+
+  _onTap() {
+    this._runAction(this._config.tap || (this._config.more_info ? 'more_info' : 'play_pause'));
+  }
+
+  _longPress() { this._runAction(this._config.long_press); }
 
   _applyPreset(p) {
     this._haptic('light');
@@ -4086,6 +4134,7 @@ const EDITOR_LABELS = {
   swipe_safe: 'Let sideways drags change page',
   swap_press_actions: 'Swap tap and hold actions',
   long_press: 'Detail action (hold, or tap when swapped)',
+  tap: 'Tap action',
   long_press_ms: 'Long press (ms)',
   step: 'Step for the +/- buttons',
   haptics: 'Haptics',
@@ -4348,6 +4397,8 @@ const STATUS_SCHEMA = INFO_SCHEMA.concat([
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
       problem_when: { selector: { text: { multiple: true } } },
+      color: { selector: { text: {} } },
+      background: { selector: { text: {} } },
     }), 'name', 'entity'),
   },
   {
@@ -4421,8 +4472,23 @@ const COVER_SCHEMA = SHARED_SCHEMA.concat([
 
 /* The media card is a control card, minus the options that make no sense for
    one: there are no levels to preset by dragging, and no ± step worth a row. */
-const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
+const MEDIA_ACTIONS = { select: { mode: 'dropdown', options: [
+  { value: 'play_pause', label: 'Play / pause' },
+  { value: 'sheet', label: 'Full-screen control' },
+  { value: 'more_info', label: "Home Assistant's dialog" },
+  { value: 'none', label: 'Nothing' },
+] } };
+
+const MEDIA_SCHEMA = SHARED_SCHEMA.map((row) => (
+  row.type === 'grid' && row.schema.some((f) => f.name === 'long_press')
+    ? Object.assign({}, row, {
+      schema: row.schema.map((f) => (
+        f.name === 'long_press' ? { name: 'long_press', selector: MEDIA_ACTIONS } : f)),
+    })
+    : row
+)).concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.media, 'name', 'source') },
+  { name: 'tap', selector: MEDIA_ACTIONS },
   {
     name: '', type: 'grid', schema: [
       { name: 'show_art', selector: { boolean: {} } },
@@ -4455,6 +4521,7 @@ const BUTTON_SCHEMA = [
       state_entity: { selector: { entity: {} } },
       color: { selector: { text: {} } },
       show_name: { selector: { boolean: {} } },
+      feedback_ms: { selector: { number: { min: 0, max: 5000, step: 100, mode: 'box' } } },
     }, 'name', 'entity'),
   },
   {

@@ -99,9 +99,9 @@ Verify a change with:
 node --check dist/nspanel-cards.js
 ```
 
-That is the only automated check that exists (CI runs it plus HACS validation). There is no
-test suite; behaviour is verified by loading the card on a real panel, or in `dev/bench.html`
-(see below).
+CI runs that plus HACS validation and three regression pages in headless Chrome, which need no
+npm and no Home Assistant: `python dev/check-{switch,light,card}-tests.py --browser <chrome>`.
+Anything those do not cover is verified on a real panel, or in `dev/bench.html` (see below).
 
 ## The hardware constraint drives every decision
 

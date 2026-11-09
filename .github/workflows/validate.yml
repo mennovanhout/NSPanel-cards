@@ -31,3 +31,5 @@ jobs:
         run: python3 dev/check-switch-tests.py
       - name: Light capability and gesture regressions
         run: python3 dev/check-light-tests.py
+      - name: Colour, media, button and status regressions
+        run: python3 dev/check-card-tests.py
