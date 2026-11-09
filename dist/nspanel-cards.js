@@ -5,6 +5,8 @@
  * holds on both. The 120 is bigger in every direction once density is taken
  * into account, and it rotates.
  *
+ * Copyright (c) 2026 Menno van Hout. MIT License: keep this notice in every copy.
+ *
  * Cards in this bundle:
  *   custom:nspanel-light-card    brightness, drag anywhere, long-press for more
  *   custom:nspanel-cover-card    position, drag anywhere, long-press for more
