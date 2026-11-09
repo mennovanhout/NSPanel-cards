@@ -691,6 +691,7 @@ class NsBaseCard extends HTMLElement {
         `this card takes ${this.constructor.domain}.*`
       );
     }
+    this._onCancel();
     this._explicitPresets = Array.isArray(config.presets);
     this._config = Object.assign({
       title: null,
@@ -825,17 +826,18 @@ class NsBaseCard extends HTMLElement {
       startValue: this._displayValue(),
     };
     this._dragging = false;
-    if (this._config.long_press !== 'none') {
-      this._pressTimer = setTimeout(() => {
+    this._pressTimer = setTimeout(() => {
         this._pressTimer = null;
         if (!this._p || this._p.axis) return;
         this._p.consumed = true;
-        this._haptic('medium');
-        this._openSheet();
+        if (this._longPressActs()) this._haptic('medium');
+        this._longPress();
       }, this._config.long_press_ms);
-    }
   }
 
+  _shortPress() { this._onTap(); }
+  _longPress() { if (this._config.long_press !== 'none') this._openSheet(); }
+  _longPressActs() { return this._config.long_press !== 'none'; }
   _canDrag() { return true; }
 
   _onMove(e) {
@@ -893,7 +895,7 @@ class NsBaseCard extends HTMLElement {
       this._haptic('light');
     } else if (!p.axis && Date.now() - p.t < this._config.long_press_ms) {
       this._haptic('light');
-      this._onTap();
+      this._shortPress();
     }
     this._reset();
   }
@@ -1070,6 +1072,19 @@ class NsPanelLightCard extends NsBaseCard {
     this._scheduleRender();
     this._call('light', 'turn_on', data);
   }
+
+  _shortPress() {
+    if (this._config.swap_press_actions === true) {
+      if (this._config.long_press !== 'none') this._openSheet();
+    } else this._onTap();
+  }
+
+  _longPress() {
+    if (this._config.swap_press_actions === true) this._onTap();
+    else super._longPress();
+  }
+
+  _longPressActs() { return this._config.swap_press_actions === true || super._longPressActs(); }
 
   _onTap() { if (!isBroken(this._stateObj)) this._call('light', 'toggle'); }
 
@@ -2288,7 +2303,7 @@ class NsPanelSwitchCard extends NsInfoCard {
     const cfg = this._config;
     const list = Array.isArray(cfg.switches) && cfg.switches.length
       ? cfg.switches
-      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon }] : []);
+      : (cfg.entity ? [{ entity: cfg.entity, name: cfg.title || cfg.name, icon: cfg.icon, detail_entity: cfg.detail_entity }] : []);
     return list
       .map((it) => (typeof it === 'string' ? { entity: it } : it))
       .filter((it) => it && it.entity)
@@ -2298,6 +2313,8 @@ class NsPanelSwitchCard extends NsInfoCard {
   _entityIds() { return this._items.map((i) => i.entity); }
 
   _teardown() {
+    (this._gestureCleanups || []).forEach((cancel) => cancel());
+    this._gestureCleanups = [];
     (this._timers || []).forEach((t) => clearTimeout(t));
     this._timers = [];
   }
@@ -2327,7 +2344,15 @@ class NsPanelSwitchCard extends NsInfoCard {
 
   /* turn_on / turn_off rather than toggle: with the echo, the tap says what it
      wants, and two quick taps cannot race the round-trip into the wrong state. */
+  /* Missing or unavailable, the same test _render draws the tile with. Not
+     isBroken(): an assumed-state switch sits at `unknown` and still works. */
+  _dead(item) {
+    const s = this._state(item.entity);
+    return !s || s.state === 'unavailable';
+  }
+
   _press(b) {
+    if (this._dead(b.item)) return;
     if (this._config.haptics) haptic(this, 'light');
     const on = !this._isOn(b);
     b.local = on;
@@ -2338,6 +2363,69 @@ class NsPanelSwitchCard extends NsInfoCard {
     }
     this._scheduleRender();
     this._later(() => this._scheduleRender(), this._config.echo_ms + 20);
+  }
+
+  _details(b) {
+    if (!this._config.more_info) return;
+    const item = b.item;
+    const target = typeof item.detail_entity === 'string' && item.detail_entity.trim()
+      ? item.detail_entity.trim() : item.entity;
+    moreInfo(this, target);
+  }
+
+  _bindSwitchPress(b) {
+    const el = b.el;
+    const swap = typeof b.item.swap_press_actions === 'boolean'
+      ? b.item.swap_press_actions : this._config.swap_press_actions === true;
+    const short = () => swap ? this._details(b) : this._press(b);
+    const long = () => swap ? this._press(b) : this._details(b);
+    let pointer = null, timer = null, suppressClick = false;
+    const clearTimer = () => { clearTimeout(timer); timer = null; };
+    const cancel = () => { clearTimer(); pointer = null; suppressClick = true; };
+    this._gestureCleanups = this._gestureCleanups || [];
+    this._gestureCleanups.push(cancel);
+    el.addEventListener('pointerdown', (e) => {
+      if (pointer || e.isPrimary === false) { cancel(); return; }
+      // A right-click has no click to suppress; the contextmenu after it must
+      // not be mistaken for the tail of an earlier tap.
+      if (e.button !== 0) { suppressClick = false; return; }
+      if (this._dead(b.item)) return;
+      suppressClick = false;
+      pointer = {id:e.pointerId, x:e.clientX, y:e.clientY, consumed:false};
+      try { el.setPointerCapture(e.pointerId); } catch (_) { /* synthetic event */ }
+      timer = setTimeout(() => {
+        timer = null;
+        if (!pointer || pointer.consumed) return;
+        pointer.consumed = true;
+        suppressClick = true;
+        long();
+      }, 500);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!pointer || pointer.id !== e.pointerId) return;
+      if (Math.hypot(e.clientX-pointer.x, e.clientY-pointer.y) >= 8) {
+        pointer.consumed = true; suppressClick = true; clearTimer();
+      }
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!pointer || pointer.id !== e.pointerId) return;
+      const consumed = pointer.consumed;
+      cancel();
+      if (!consumed) short();
+    });
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('lostpointercapture', cancel);
+    el.addEventListener('click', (e) => {
+      // Keyboard/assistive clicks have no pointer sequence (detail=0).
+      if (e.detail !== 0 && suppressClick) { e.preventDefault(); return; }
+      short();
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (pointer || suppressClick) return;
+      suppressClick = true;
+      long();
+    });
   }
 
   _build() {
@@ -2369,11 +2457,7 @@ class NsPanelSwitchCard extends NsInfoCard {
         local: null,
         localUntil: 0,
       };
-      el.addEventListener('click', () => this._press(b));
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (this._config.more_info) moreInfo(this, item.entity);
-      });
+      this._bindSwitchPress(b);
       pad.appendChild(el);
       return b;
     });
@@ -3956,6 +4040,7 @@ const EDITOR_LABELS = {
   entities: 'Entities',
   buttons: 'Buttons',
   switches: 'Switches',
+  detail_entity: 'Long-press detail entity',
   severity: 'Severity colours',
   name: 'Name',
   brightness_pct: 'Brightness (%)',
@@ -3997,7 +4082,8 @@ const EDITOR_LABELS = {
   echo_ms: 'Ignore state echo (ms)',
   drag_travel: 'Drag travel (px, 0 = card height)',
   swipe_safe: 'Let sideways drags change page',
-  long_press: 'Long press',
+  swap_press_actions: 'Swap tap and hold actions',
+  long_press: 'Detail action (hold, or tap when swapped)',
   long_press_ms: 'Long press (ms)',
   step: 'Step for the +/- buttons',
   haptics: 'Haptics',
@@ -4322,6 +4408,7 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
 
 /* The light card is the only one whose accent can come from the entity. */
 const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
+  { name: 'swap_press_actions', selector: { boolean: {} } },
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
 ]);
@@ -4411,6 +4498,8 @@ const SWIPE_SCHEMA = [
 ];
 
 const SWITCH_SCHEMA = [
+  { name: 'swap_press_actions', selector: { boolean: {} } },
+  { name: 'detail_entity', selector: { entity: {} } },
   { name: 'title', selector: { text: {} } },
   {
     name: '', type: 'grid', schema: [
@@ -4422,6 +4511,8 @@ const SWITCH_SCHEMA = [
   {
     name: 'switches', selector: listOf({
       entity: { required: true, selector: { entity: { domain: SWITCH_DOMAINS } } },
+      detail_entity: { selector: { entity: {} } },
+      swap_press_actions: { selector: { boolean: {} } },
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
       show_name: { selector: { boolean: {} } },
