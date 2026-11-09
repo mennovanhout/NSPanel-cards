@@ -205,16 +205,16 @@ const hass = {
 
     'weather.home': st('weather.home', 'partlycloudy',
       { friendly_name: 'Forecast Home', temperature: 14, temperature_unit: '°C',
-        humidity: 71, wind_speed: 11, wind_speed_unit: 'km/h',
+        humidity: 71, wind_speed: 11, wind_speed_unit: 'km/h', precipitation_unit: 'mm',
         forecast: [
           { datetime: '2026-03-05T12:00:00+00:00', condition: 'partlycloudy',
-            temperature: 14, templow: 7 },
+            temperature: 14, templow: 7, precipitation: 0, precipitation_probability: 8 },
           { datetime: '2026-03-06T12:00:00+00:00', condition: 'rainy',
-            temperature: 11, templow: 6 },
+            temperature: 11, templow: 6, precipitation: 2.4, precipitation_probability: 72 },
           { datetime: '2026-03-07T12:00:00+00:00', condition: 'pouring',
-            temperature: 9, templow: 5 },
+            temperature: 9, templow: 5, precipitation: 11, precipitation_probability: 95 },
           { datetime: '2026-03-08T12:00:00+00:00', condition: 'sunny',
-            temperature: 13, templow: 4 },
+            temperature: 13, templow: 4, precipitation: 0, precipitation_probability: 3 },
         ] }),
 
     'media_player.kitchen': st('media_player.kitchen', 'playing',
@@ -439,7 +439,7 @@ card('nspanel-status-card', {
 }, document.getElementById('s-status'));
 
 card('nspanel-weather-card', {
-  entity: 'weather.home', title: 'Amsterdam', height: 288,
+  entity: 'weather.home', title: 'Amsterdam', height: 288, show_precipitation: true,
 }, document.getElementById('s-sky'));
 
 card('nspanel-clock-card', {
