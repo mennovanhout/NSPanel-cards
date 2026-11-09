@@ -989,6 +989,7 @@ card, or the browser gets a blank page.
 | `sleep_after` | `0` | seconds of picture before the backlight goes off; `0` is at once |
 | **Waking up** | | |
 | `wake_on_proximity` | `true` | someone walking up wakes it; touch always does |
+| `keep_awake_on_proximity` | `false` | also hold the screensaver off while someone is near; off, walking past changes nothing |
 | `proximity_delta` | `12` | how far the sensor must move from its resting level; 15% of that level is the floor, so a panel that rests at 400 needs 60 |
 | `proximity_below` | none | wake when the reading drops below this, instead of the learned level |
 | `proximity_above` | none | wake when the reading rises above this, instead of the learned level |
@@ -1000,6 +1001,13 @@ what is set there wins over this card for that one panel.
 How the proximity wake learns its resting level, and why sleep is a real backlight-off rather
 than brightness 0, is in the
 [app's README](https://github.com/mennovanhout/nspanelpro-flutter#screensaver).
+
+The native-only option `keep_awake_on_proximity: true` inhibits automatic sleep
+while proximity is detected (default false). It has no web behavior and no web
+editor control. Native `after`, `sleep`, and `sleep_after` retain their existing
+meaning: for example, 15, true, and 0 switch the backlight off after 15 idle seconds;
+MQTT can later change `sleep_after` to show the screensaver first. See the native
+app README for display ownership, sensor thresholds and the 500 ms wake touch guard.
 
 ## The native app
 
