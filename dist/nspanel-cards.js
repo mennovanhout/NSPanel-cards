@@ -45,7 +45,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.11.0';
+const NSPANEL_VERSION = '0.12.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1042,6 +1042,7 @@ class NsBaseCard extends HTMLElement {
         `this card takes ${this.constructor.domain}.*`
       );
     }
+    this._onCancel();
     this._explicitPresets = Array.isArray(config.presets);
     this._config = Object.assign({
       title: null,
@@ -1180,17 +1181,18 @@ class NsBaseCard extends HTMLElement {
       startValue: this._displayValue(),
     };
     this._dragging = false;
-    if (this._config.long_press !== 'none') {
-      this._pressTimer = setTimeout(() => {
+    this._pressTimer = setTimeout(() => {
         this._pressTimer = null;
         if (!this._p || this._p.axis) return;
         this._p.consumed = true;
-        this._haptic('medium');
-        this._openSheet();
+        if (this._longPressActs()) this._haptic('medium');
+        this._longPress();
       }, this._config.long_press_ms);
-    }
   }
 
+  _shortPress() { this._onTap(); }
+  _longPress() { if (this._config.long_press !== 'none') this._openSheet(); }
+  _longPressActs() { return this._config.long_press !== 'none'; }
   _canDrag() { return true; }
 
   _onMove(e) {
@@ -1248,7 +1250,7 @@ class NsBaseCard extends HTMLElement {
       this._haptic('light');
     } else if (!p.axis && Date.now() - p.t < this._config.long_press_ms) {
       this._haptic('light');
-      this._onTap();
+      this._shortPress();
     }
     this._reset();
   }
@@ -1430,6 +1432,19 @@ class NsPanelLightCard extends NsBaseCard {
     this._scheduleRender();
     this._call('light', 'turn_on', data);
   }
+
+  _shortPress() {
+    if (this._config.swap_press_actions === true) {
+      if (this._config.long_press !== 'none') this._openSheet();
+    } else this._onTap();
+  }
+
+  _longPress() {
+    if (this._config.swap_press_actions === true) this._onTap();
+    else super._longPress();
+  }
+
+  _longPressActs() { return this._config.swap_press_actions === true || super._longPressActs(); }
 
   _onTap() { if (!isBroken(this._stateObj)) this._call('light', 'toggle'); }
 
@@ -1826,6 +1841,13 @@ const INFO_CSS = `
 .fc ha-icon { --mdc-icon-size: 22px; margin: 2px 0; }
 .fc .dt { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .fc .dt span { font-weight: 500; opacity: .55; margin-left: 2px; }
+/* the rain under the temperature: blue when it is worth noticing */
+.fc .dr {
+  margin-top: 3px; font-size: 12px; font-weight: 600; line-height: 14px;
+  color: var(--ns-muted); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fc .dr.wet { color: #7cc4ff; }
 `;
 
 /* Icons by device_class, so a sensor card with no icon still looks like the
@@ -2619,6 +2641,8 @@ class NsPanelSwitchCard extends NsInfoCard {
 
   _teardown() {
     if (this._lightDialog) sheet().close();
+    (this._gestureCleanups || []).forEach((cancel) => cancel());
+    this._gestureCleanups = [];
     (this._timers || []).forEach((t) => clearTimeout(t));
     this._timers = [];
   }
@@ -2648,7 +2672,15 @@ class NsPanelSwitchCard extends NsInfoCard {
 
   /* turn_on / turn_off rather than toggle: with the echo, the tap says what it
      wants, and two quick taps cannot race the round-trip into the wrong state. */
+  /* Missing or unavailable, the same test _render draws the tile with. Not
+     isBroken(): an assumed-state switch sits at `unknown` and still works. */
+  _dead(item) {
+    const s = this._state(item.entity);
+    return !s || s.state === 'unavailable';
+  }
+
   _press(b) {
+    if (this._dead(b.item)) return;
     if (this._config.haptics) haptic(this, 'light');
     const on = !this._isOn(b);
     b.local = on;
@@ -2659,6 +2691,78 @@ class NsPanelSwitchCard extends NsInfoCard {
     }
     this._scheduleRender();
     this._later(() => this._scheduleRender(), this._config.echo_ms + 20);
+  }
+
+  _details(b) {
+    if (!this._config.more_info) return;
+    const item = b.item;
+    const target = typeof item.detail_entity === 'string' && item.detail_entity.trim()
+      ? item.detail_entity.trim() : item.entity;
+    if (target.startsWith('light.')) {
+      if (this._lightDialog) sheet().close();
+      this._lightDialog = new LightDialog(this, {
+        entity: target, name: item.name, accent: this._config.accent,
+        echo_ms: this._config.echo_ms,
+        step: item.step ?? this._config.step,
+        step_target: item.step_target ?? this._config.step_target,
+        effect_favorites: item.effect_favorites ?? this._config.effect_favorites,
+      });
+    } else moreInfo(this, target);
+  }
+
+  _bindSwitchPress(b) {
+    const el = b.el;
+    const swap = typeof b.item.swap_press_actions === 'boolean'
+      ? b.item.swap_press_actions : this._config.swap_press_actions === true;
+    const short = () => swap ? this._details(b) : this._press(b);
+    const long = () => swap ? this._press(b) : this._details(b);
+    let pointer = null, timer = null, suppressClick = false;
+    const clearTimer = () => { clearTimeout(timer); timer = null; };
+    const cancel = () => { clearTimer(); pointer = null; suppressClick = true; };
+    this._gestureCleanups = this._gestureCleanups || [];
+    this._gestureCleanups.push(cancel);
+    el.addEventListener('pointerdown', (e) => {
+      if (pointer || e.isPrimary === false) { cancel(); return; }
+      // A right-click has no click to suppress; the contextmenu after it must
+      // not be mistaken for the tail of an earlier tap.
+      if (e.button !== 0) { suppressClick = false; return; }
+      if (this._dead(b.item)) return;
+      suppressClick = false;
+      pointer = {id:e.pointerId, x:e.clientX, y:e.clientY, consumed:false};
+      try { el.setPointerCapture(e.pointerId); } catch (_) { /* synthetic event */ }
+      timer = setTimeout(() => {
+        timer = null;
+        if (!pointer || pointer.consumed) return;
+        pointer.consumed = true;
+        suppressClick = true;
+        long();
+      }, 500);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!pointer || pointer.id !== e.pointerId) return;
+      if (Math.hypot(e.clientX-pointer.x, e.clientY-pointer.y) >= 8) {
+        pointer.consumed = true; suppressClick = true; clearTimer();
+      }
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!pointer || pointer.id !== e.pointerId) return;
+      const consumed = pointer.consumed;
+      cancel();
+      if (!consumed) short();
+    });
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('lostpointercapture', cancel);
+    el.addEventListener('click', (e) => {
+      // Keyboard/assistive clicks have no pointer sequence (detail=0).
+      if (e.detail !== 0 && suppressClick) { e.preventDefault(); return; }
+      short();
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (pointer || suppressClick) return;
+      suppressClick = true;
+      long();
+    });
   }
 
   _build() {
@@ -2690,24 +2794,7 @@ class NsPanelSwitchCard extends NsInfoCard {
         local: null,
         localUntil: 0,
       };
-      el.addEventListener('click', () => this._press(b));
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (this._config.more_info) {
-          const target = typeof item.detail_entity === 'string' && item.detail_entity.trim()
-            ? item.detail_entity.trim() : item.entity;
-          if (target.startsWith('light.')) {
-            if (this._lightDialog) sheet().close();
-            this._lightDialog = new LightDialog(this, {
-              entity: target, name: item.name, accent: this._config.accent,
-              echo_ms: this._config.echo_ms,
-              step: item.step ?? this._config.step,
-              step_target: item.step_target ?? this._config.step_target,
-              effect_favorites: item.effect_favorites ?? this._config.effect_favorites,
-            });
-          } else moreInfo(this, target);
-        }
-      });
+      this._bindSwitchPress(b);
       pad.appendChild(el);
       return b;
     });
@@ -3860,11 +3947,28 @@ const CONDITION_LABELS = {
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/* The rain in one forecast entry, as short as a tile allows: "80% · 1.2mm",
+   "3% · 0mm", "40%". Null when the provider sends neither. `wet` is worth
+   noticing: a real chance, or any amount at all. The app has the same
+   function (lib/util/weather.dart); keep them saying the same thing. */
+function rainOf(f, unit) {
+  const prob = typeof f.precipitation_probability === 'number' ? f.precipitation_probability : null;
+  const amount = typeof f.precipitation === 'number' ? f.precipitation : null;
+  if (prob === null && amount === null) return null;
+  const parts = [];
+  if (prob !== null) parts.push(`${Math.round(prob)}%`);
+  // the amount whenever it is known, dry hours too: the chance alone cannot
+  // tell a drizzle from a downpour. No space before the unit: five tiles
+  // across leave ~73 px, and "100% · 12 mm" needs 77.
+  if (amount !== null) parts.push(amount > 0 ? `${fmt(amount, amount < 10 ? 1 : 0)}${unit}` : `0${unit}`);
+  return { text: parts.join(' \u00b7 '), wet: (prob || 0) >= 30 || (amount || 0) > 0 };
+}
+
 class NsPanelWeatherCard extends NsInfoCard {
   static get cardType() { return 'nspanel-weather-card'; }
   static get accent() { return '#7cc4ff'; }
   static get defaultOptions() {
-    return { show_forecast: true, forecast_type: 'daily', forecast_count: 4 };
+    return { show_forecast: true, forecast_type: 'daily', forecast_count: 4, show_precipitation: false };
   }
 
   static getStubConfig(hass) {
@@ -3981,16 +4085,17 @@ class NsPanelWeatherCard extends NsInfoCard {
     }
     this._elSub.textContent = broken ? 'Unavailable' : bits.join(' · ');
 
-    this._renderForecast(unit);
+    this._renderForecast(unit, a.precipitation_unit || 'mm');
   }
 
   /* The forecast rebuilds only when the data actually changes - it arrives on
      its own subscription, not with every hass update, but a repaint per state
      change would still be wasteful. */
-  _renderForecast(unit) {
+  _renderForecast(unit, rainUnit) {
     const list = this._config.show_forecast ? this._forecastList() : [];
+    const rainy = !!this._config.show_precipitation;
     const stamp = JSON.stringify(list.map((f) => [f.datetime, f.condition,
-      f.temperature, f.templow]));
+      f.temperature, f.templow, rainy && f.precipitation, rainy && f.precipitation_probability]));
     if (stamp === this._fcShown) return;
     this._fcShown = stamp;
 
@@ -4010,6 +4115,13 @@ class NsPanelWeatherCard extends NsInfoCard {
         `<div class="dd">${label}</div>` +
         `<ha-icon icon="${WEATHER_ICONS[f.condition] || 'mdi:weather-cloudy'}"></ha-icon>` +
         `<div class="dt">${fmt(f.temperature, 0)}${unit === '%' ? '' : ''}${low}</div>`;
+      if (rainy) {
+        const r = rainOf(f, rainUnit);
+        const el = document.createElement('div');
+        el.className = 'dr' + (r && r.wet ? ' wet' : '');
+        el.textContent = r ? r.text : '\u2013';
+        d.appendChild(el);
+      }
       this._elFc.appendChild(d);
     });
   }
@@ -4291,6 +4403,7 @@ const EDITOR_LABELS = {
   on_text: 'Text while on',
   off_text: 'Text while off',
   show_name: 'Show names',
+  show_precipitation: 'Show the chance and amount of rain',
   show_state: 'Show the state line',
   interval: 'Seconds between pictures',
   fit: 'Picture fit',
@@ -4308,7 +4421,8 @@ const EDITOR_LABELS = {
   echo_ms: 'Ignore state echo (ms)',
   drag_travel: 'Drag travel (px, 0 = card height)',
   swipe_safe: 'Let sideways drags change page',
-  long_press: 'Long press',
+  swap_press_actions: 'Swap tap and hold actions',
+  long_press: 'Detail action (hold, or tap when swapped)',
   long_press_ms: 'Long press (ms)',
   step: 'Step for the +/- buttons',
   haptics: 'Haptics',
@@ -4596,6 +4710,7 @@ const WEATHER_SCHEMA = INFO_SCHEMA.concat([
       { name: 'forecast_count', selector: { number: { min: 1, max: 5, step: 1, mode: 'box' } } },
     ],
   },
+  { name: 'show_precipitation', selector: { boolean: {} } },
 ]);
 
 const CLOCK_SCHEMA = [
@@ -4644,6 +4759,7 @@ const LIGHT_DETAIL_FIELDS = {
 const LIGHT_DETAIL_SCHEMA = Object.entries(LIGHT_DETAIL_FIELDS).map(([name, field]) => ({name, ...field}));
 
 const LIGHT_SCHEMA = SHARED_SCHEMA.concat(LIGHT_DETAIL_SCHEMA, [
+  { name: 'swap_press_actions', selector: { boolean: {} } },
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
 ]);
@@ -4735,6 +4851,7 @@ const SWIPE_SCHEMA = [
 const SWITCH_SCHEMA = [
   ...LIGHT_DETAIL_SCHEMA,
   {name: 'step', selector: {number: {min: 1, max: 50, step: 1, mode: 'box'}}},
+  { name: 'swap_press_actions', selector: { boolean: {} } },
   { name: 'detail_entity', selector: { entity: {} } },
   { name: 'title', selector: { text: {} } },
   {
@@ -4750,6 +4867,7 @@ const SWITCH_SCHEMA = [
       detail_entity: { selector: { entity: {} } },
       ...LIGHT_DETAIL_FIELDS,
       step: {selector: {number: {min: 1, max: 50, step: 1, mode: 'box'}}},
+      swap_press_actions: { selector: { boolean: {} } },
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
       show_name: { selector: { boolean: {} } },
