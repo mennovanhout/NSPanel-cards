@@ -1,0 +1,157 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Light capability regression tests</title>
+<style>body{margin:0;background:#0b0d10;color:white;font:16px sans-serif}#fixture{width:480px}#result{white-space:pre-wrap}button:disabled{cursor:default}</style>
+<div id="fixture"></div><pre id="result">Running</pre>
+<script src="../kiosk/icons.js"></script>
+<script src="../dist/nspanel-cards.js"></script>
+<script>
+// No HA connection: every command is recorded locally and never sent anywhere.
+if (!customElements.get('ha-icon')) customElements.define('ha-icon', class extends HTMLElement {});
+const fixture = document.querySelector('#fixture');
+const calls = [];
+const results = [];
+// CLI Chromium's virtual clock can advance timers without painting a frame.
+// Drain only a pending card render so these tests do not depend on its scheduler.
+const pause = () => new Promise((resolve) => setTimeout(() => {
+  if (card && card._raf !== null) {
+    cancelAnimationFrame(card._raf);
+    card._raf = null;
+    card._render();
+  }
+  resolve();
+}, 30));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+let card;
+function state(modes, value = 'on', attributes = {}) {
+  return { entity_id: 'light.test', state: value,
+    attributes: { friendly_name: 'Test light', supported_color_modes: modes, brightness: 128, ...attributes } };
+}
+function setState(s) {
+  card.hass = { states: s ? { 'light.test': s } : {},
+    callService: (domain, service, data) => { calls.push({ domain, service, data }); return Promise.resolve(); } };
+}
+async function mount(s, config = {}) {
+  if (_sheet && _sheet.parentNode) _sheet.close();
+  fixture.replaceChildren();
+  calls.length = 0;
+  card = document.createElement('nspanel-light-card');
+  card.setConfig({ entity: 'light.test', height: 260, haptics: false, ...config });
+  fixture.append(card);
+  setState(s);
+  await pause();
+}
+const visible = (node) => !!node && node.isConnected && getComputedStyle(node).display !== 'none' && !node.hidden;
+async function test(name, fn) {
+  try { await fn(); results.push({ name, passed: true }); }
+  catch (e) { results.push({ name, passed: false, error: e.message }); }
+}
+async function run() {
+  const cases = await (await fetch('light-capabilities.json')).json();
+  for (const c of cases) await test(c.name, () => {
+    const actual = lightCapabilities(c.state);
+    for (const key of ['available', 'brightness', 'color', 'temperature'])
+      assert(actual[key] === c[key], key + ' differs');
+  });
+  await test('onoff presentation and gestures', async () => {
+    await mount(state(['onoff']));
+    assert(!visible(card._elValue), 'unexpected percentage');
+    assert(!visible(card._elPresets), 'unexpected default presets');
+    card._onDown({ pointerId: 1, clientX: 20, clientY: 100, button: 0 });
+    card._onMove({ pointerId: 1, clientX: 20, clientY: 20 });
+    card._onUp({ pointerId: 1 });
+    assert(calls.length === 0, 'vertical movement switched relay');
+    card._onDown({ pointerId: 2, clientX: 20, clientY: 100, button: 0 });
+    card._onMove({ pointerId: 2, clientX: 120, clientY: 100 });
+    card._onUp({ pointerId: 2 });
+    assert(calls.length === 0, 'horizontal movement switched relay');
+    card._onDown({ pointerId: 3, clientX: 20, clientY: 100, button: 0 });
+    card._onUp({ pointerId: 3 });
+    assert(calls.length === 1 && calls[0].service === 'toggle', 'tap must toggle exactly once');
+    assert(Object.keys(calls[0].data).join(',') === 'entity_id', 'unexpected relay parameters');
+  });
+  await test('long press and close issue no commands', async () => {
+    await mount(state(['onoff']), { long_press_ms: 10 });
+    card._onDown({ pointerId: 1, clientX: 20, clientY: 100, button: 0 });
+    await pause();
+    card._onUp({ pointerId: 1 });
+    assert(card._sheetOpen, 'long press did not open dialog');
+    assert(!visible(sheet()._body), 'unexpected slider');
+    sheet().close();
+    assert(calls.length === 0, 'hold or close sent a command');
+  });
+  await test('long press none', async () => {
+    await mount(state(['onoff']), { long_press: 'none', long_press_ms: 10 });
+    card._onDown({ pointerId: 1, clientX: 20, clientY: 100, button: 0 });
+    await pause();
+    card._onUp({ pointerId: 1 });
+    assert(!card._sheetOpen && calls.length === 0, 'disabled hold acted');
+  });
+  await test('live dialog and unavailable guard', async () => {
+    await mount(state(['onoff']));
+    card._openSheet();
+    setState(state(['onoff'], 'off'));
+    await pause();
+    assert(sheet()._state.textContent === 'Off', 'stale dialog state');
+    assert(sheet()._actions.lastChild.textContent === 'Turn on', 'stale action');
+    setState(state(['onoff'], 'unavailable'));
+    await pause();
+    assert(sheet()._state.textContent === 'Unavailable', 'missing unavailable state');
+    assert(sheet()._actions.lastChild.disabled, 'action remains enabled');
+    card._commit(.5); card._onTap(); card._applyPreset({ scene: 'scene.evening' });
+    assert(calls.length === 0, 'stale action bypassed guard');
+  });
+  await test('explicit presets remain visible but incompatible ones are disabled', async () => {
+    await mount(state(['onoff']), { presets: [
+      { name: 'Half', brightness_pct: 50 }, { name: 'Scene', scene: 'scene.evening' },
+      { name: 'Off', brightness_pct: 0 }, { name: 'Red', rgb_color: [255, 0, 0] }
+    ] });
+    const buttons = card._elPresets.children;
+    assert(buttons[0].disabled && buttons[3].disabled, 'incompatible presets enabled');
+    assert(!buttons[1].disabled && !buttons[2].disabled, 'valid presets disabled');
+    buttons[0].click(); buttons[3].click();
+    assert(calls.length === 0, 'disabled preset sent a command');
+    buttons[1].click(); buttons[2].click();
+    assert(calls.length === 2 && calls[0].domain === 'scene' && calls[1].service === 'turn_off', 'valid presets lost');
+  });
+  await test('dimmer capability change updates open dialog', async () => {
+    await mount(state(['brightness']));
+    assert(visible(card._elValue) && visible(card._elPresets), 'dimmer controls missing');
+    card._openSheet();
+    assert(visible(sheet()._body), 'dimmer sheet missing');
+    setState(state(['onoff']));
+    await pause();
+    assert(!visible(sheet()._body) && !visible(card._elValue), 'stale brightness UI');
+    sheet()._step(5); card._commit(.75);
+    assert(calls.length === 0, 'stale brightness handler acted');
+  });
+  await test('shared sheet keeps its default level controls', async () => {
+    sheet().open({ title: 'Cover', state: 'Open', value: .5, onCommit: (v) => calls.push(v) });
+    assert(visible(sheet()._body), 'other card lost its slider');
+    calls.length = 0; sheet()._step(5);
+    assert(calls.length === 1 && Math.abs(calls[0] - .55) < .001, 'default step broken');
+    sheet().close();
+  });
+  await test('cancelled sheet drag does not commit', async () => {
+    await mount(state(['brightness'])); card._openSheet();
+    const sh = sheet();
+    // A real pointer-cancel terminates an active drag without invoking onCommit.
+    sh._trackActive = true;
+    sh._track.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 }));
+    assert(!sh._trackActive && calls.length === 0, 'cancel committed a value');
+    sh.close();
+  });
+  await mount(state(['onoff']));
+  const preview = new URLSearchParams(location.search).get('preview');
+  if (preview === 'dimmer') await mount(state(['brightness']));
+  if (preview === 'sheet') card._openSheet();
+  window.lightTestResults = results;
+  document.querySelector('#result').textContent = JSON.stringify(results, null, 2);
+  document.documentElement.dataset.testStatus = results.every((r) => r.passed) ? 'passed' : 'failed';
+  if (preview) document.querySelector('#result').style.display = 'none';
+}
+run().catch((e) => {
+  document.documentElement.dataset.testStatus = 'failed';
+  document.querySelector('#result').textContent = e.stack;
+});
+</script>
