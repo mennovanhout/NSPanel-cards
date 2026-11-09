@@ -165,6 +165,39 @@ async function run() {
     light._onDown(event('down')); light._onUp(event('up'));
     assert(calls.length === 1, 'unavailable light acted');
   });
+  await test('a switch in state unknown still works', async () => {
+    await mount({switches:['switch.primary']});
+    card.hass = {states:{'switch.primary':{entity_id:'switch.primary', state:'unknown', attributes:{}}},
+      callService:(domain, service, data) => {calls.push({domain, service, data}); return Promise.resolve();}};
+    await pause();
+    const button = card.shadowRoot.querySelector('.btn');
+    assert(!button.hasAttribute('disabled'), 'unknown tile drawn disabled');
+    pointer(button, 'pointerdown'); pointer(button, 'pointerup');
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    assert(calls.length === 1 && calls[0].service === 'turn_on', 'unknown switch ignored the tap');
+  });
+  await test('right-click opens details after an earlier tap', async () => {
+    await mount({switches:['switch.primary']});
+    const button = card.shadowRoot.querySelector('.btn');
+    pointer(button, 'pointerdown'); pointer(button, 'pointerup');
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    button.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:2, isPrimary:true, button:2, clientX:20, clientY:20}));
+    button.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, cancelable:true, button:2}));
+    assert(opened.length === 1 && opened[0] === 'switch.primary', 'right-click after a tap did nothing');
+  });
+  await test('a hold with long_press none gives no haptic', async () => {
+    fixture.replaceChildren();
+    const light = document.createElement('nspanel-light-card');
+    light.setConfig({entity:'light.test', long_press:'none', long_press_ms:10});
+    fixture.append(light);
+    light.hass = {states:{'light.test':{entity_id:'light.test',state:'on',attributes:{supported_color_modes:['brightness'],brightness:128}}}, callService:() => {}};
+    const felt = [];
+    light._haptic = (k) => felt.push(k);
+    light._onDown({pointerId:1, button:0, clientX:20, clientY:20});
+    await new Promise((r) => setTimeout(r, 40));
+    assert(!felt.includes('medium'), 'a hold that does nothing buzzed');
+    light._onCancel();
+  });
   await test('editor exposes swap at card and switch item level', () => {
     assert(LIGHT_SCHEMA.some((r) => r.name === 'swap_press_actions'), 'light field missing');
     assert(SWITCH_SCHEMA.some((r) => r.name === 'swap_press_actions'), 'switch field missing');
