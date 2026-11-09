@@ -56,7 +56,8 @@ async function run() {
   await test('shorthand hold uses trimmed target; tap and state keep primary', async () => {
     await mount({entity:'switch.primary', detail_entity:' light.detail '});
     hold();
-    assert(opened.join() === 'light.detail' && !calls.length, 'hold routing or no-service contract failed');
+    assert(card._lightDialog?.config.entity === 'light.detail' && !opened.length && !calls.length, 'hold routing or no-service contract failed');
+    sheet().close();
     const button = card.shadowRoot.querySelector('.btn');
     assert(button.querySelector('.st').textContent === 'Off', 'state does not reflect primary');
     button.click();
@@ -67,8 +68,8 @@ async function run() {
       {entity:'switch.primary', detail_entity:'light.detail'},
       {entity:'input_boolean.secondary', detail_entity:'sensor.detail'},
     ]});
-    hold(0); hold(1);
-    assert(opened.join() === 'light.detail,sensor.detail' && !calls.length, 'grid targets not independent');
+    hold(0); assert(card._lightDialog?.config.entity === 'light.detail','light detail target'); sheet().close(); hold(1);
+    assert(opened.join() === 'sensor.detail' && !calls.length, 'grid targets not independent');
     card.shadowRoot.querySelectorAll('.btn')[1].click();
     assert(calls[0].data.entity_id === 'input_boolean.secondary' && calls[0].service === 'turn_off', 'secondary tap redirected');
   });
@@ -102,8 +103,8 @@ async function run() {
     await mount({entity:'switch.primary', detail_entity:' light.detail ', swap_press_actions:true});
     const button = card.shadowRoot.querySelector('.btn');
     tap(button);
-    assert(opened.join() === 'light.detail' && !calls.length, 'swapped tap did not open only detail');
-    opened.length = 0;
+    assert(card._lightDialog?.config.entity === 'light.detail' && !calls.length, 'swapped tap did not open only detail');
+    sheet().close(); opened.length = 0;
     pointer(button, 'pointerdown');
     await new Promise((resolve) => setTimeout(resolve, 550));
     pointer(button, 'pointerup');
@@ -121,7 +122,8 @@ async function run() {
     assert(calls.length === 1 && calls[0].data.entity_id === 'switch.primary', 'false override did not power');
     assert(opened.join() === 'sensor.detail', 'inherited swap did not open detail');
     await longPress(buttons[0]);
-    assert(opened.join() === 'sensor.detail,light.detail', 'false override hold did not open detail');
+    assert(opened.join() === 'sensor.detail' && card._lightDialog?.config.entity === 'light.detail', 'false override hold did not open detail');
+    sheet().close();
   });
   await test('swapped detail can be disabled without losing power', async () => {
     await mount({entity:'switch.primary', more_info:false, swap_press_actions:true});
