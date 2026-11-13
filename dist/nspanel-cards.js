@@ -47,7 +47,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.13.0';
+const NSPANEL_VERSION = '0.14.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -145,6 +145,244 @@ function isBroken(stateObj) {
 function friendly(stateObj, entityId) {
   return (stateObj && stateObj.attributes && stateObj.attributes.friendly_name) ||
     (entityId ? entityId.split('.')[1].replace(/_/g, ' ') : '');
+}
+
+/* ================================================================== *
+ * Words - English, Nederlands, Deutsch
+ *
+ * Every word a card face, a sheet or the keypad draws, in all three
+ * languages side by side, so a missing translation shows up in review rather
+ * than at the wall. The wording is the Flutter app's (lib/l10n/strings.dart):
+ * the two renderers draw the same configs and should say the same thing.
+ * The one deliberate difference is English `not_home`, which stays "Not home"
+ * here because that is what this bundle has always said.
+ *
+ * The language is the Home Assistant user's (hass.locale.language, or the
+ * older hass.language), reduced to its base - nl-BE is nl, de_AT is de - and
+ * anything that is not one of these three is English. The editor's labels
+ * and anything only a developer reads stay English.
+ * ================================================================== */
+
+const I18N = {
+  en: {
+    unavailable: 'Unavailable', unknown: 'Unknown', missing: 'Missing', offline: 'Offline',
+    on: 'On', off: 'Off', turnOn: 'Turn on', turnOff: 'Turn off',
+    open: 'Open', closed: 'Closed', loading: 'Loading…', ok: 'OK',
+    close: 'Close', increase: 'Increase', decrease: 'Decrease',
+    // HA's raw state ids, as words. English is exactly what de-slugging gives.
+    'state.on': 'On', 'state.off': 'Off', 'state.open': 'Open', 'state.closed': 'Closed',
+    'state.opening': 'Opening', 'state.closing': 'Closing',
+    'state.unavailable': 'Unavailable', 'state.unknown': 'Unknown',
+    'state.home': 'Home', 'state.not_home': 'Not home',
+    'state.locked': 'Locked', 'state.unlocked': 'Unlocked', 'state.locking': 'Locking',
+    'state.unlocking': 'Unlocking', 'state.jammed': 'Jammed', 'state.idle': 'Idle',
+    'state.playing': 'Playing', 'state.paused': 'Paused', 'state.standby': 'Standby',
+    'state.buffering': 'Buffering', 'state.cleaning': 'Cleaning', 'state.docked': 'Docked',
+    'state.returning': 'Returning', 'state.charging': 'Charging',
+    'state.above_horizon': 'Above horizon', 'state.below_horizon': 'Below horizon',
+    // dates; Sunday first, as Date.getDay()
+    daysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    daysLong: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+      'September', 'October', 'November', 'December'],
+    longDate: (day, date, month) => `${day} ${date} ${month}`,
+    // light
+    lightLow: 'Low', lightMid: 'Mid', lightFull: 'Full',
+    onPct: (pct) => `On · ${pct}%`,
+    // cover
+    coverOpening: 'Opening', coverClosing: 'Closing',
+    coverPercentOpen: (pct) => `${pct}% open`,
+    coverOpen: 'Open', coverStop: 'Stop', coverClose: 'Close',
+    coverPresetOpen: 'Open', coverPresetHalf: 'Half', coverPresetShut: 'Shut',
+    // climate
+    'hvac.heat': 'Heat', 'hvac.cool': 'Cool', 'hvac.heat_cool': 'Auto', 'hvac.auto': 'Auto',
+    'hvac.dry': 'Dry', 'hvac.fan_only': 'Fan',
+    'action.heating': 'Heating', 'action.cooling': 'Cooling', 'action.drying': 'Drying',
+    'action.fan': 'Fan', 'action.idle': 'Idle', 'action.off': 'Off',
+    'action.preheating': 'Preheating', 'action.defrosting': 'Defrosting',
+    climateNow: (temp) => `Now ${temp}°`,
+    climateEco: 'Eco', climateDay: 'Day', climateWarm: 'Warm',
+    // media
+    mediaNothing: 'Nothing playing', mediaPaused: 'Paused', mediaPlaying: 'Playing',
+    mediaPausedLine: (sub) => `Paused · ${sub}`,
+    mediaPrevious: 'Previous', mediaPause: 'Pause', mediaPlay: 'Play', mediaNext: 'Next',
+    mediaStop: 'Stop',
+    // status
+    detected: 'Detected', clear: 'Clear', wet: 'Wet', dry: 'Dry', problem: 'Problem',
+    allClear: 'All clear',
+    // buttons, switches, camera
+    tapAgain: 'Tap again', run: 'Run', cameraUnavailable: 'Camera unavailable',
+    // alarm
+    'mode.home': 'Home', 'mode.away': 'Away', 'mode.night': 'Night',
+    'mode.custom_bypass': 'Bypass', 'mode.vacation': 'Vacation',
+    armIn: (mode) => `Arm ${mode.toLowerCase()}`,
+    disarm: 'Disarm', disarmed: 'Disarmed',
+    armedHome: 'Armed home', armedAway: 'Armed away', armedNight: 'Armed night',
+    armedVacation: 'Armed vacation', armedBypass: 'Armed (bypass)',
+    arming: 'Arming…', disarming: 'Disarming…', pending: 'Pending…',
+    triggered: 'TRIGGERED',
+    changedBy: (who) => `by ${who}`,
+    enterCode: 'Enter the code', wrongCode: 'Wrong code',
+    // weather: the condition ids that do not survive a naive de-slugging, and
+    // the rest, so they can be translated
+    'cond.clear-night': 'Clear', 'cond.cloudy': 'Cloudy', 'cond.exceptional': 'Severe',
+    'cond.fog': 'Fog', 'cond.hail': 'Hail', 'cond.lightning': 'Lightning',
+    'cond.lightning-rainy': 'Thunder, rain', 'cond.partlycloudy': 'Partly cloudy',
+    'cond.pouring': 'Heavy rain', 'cond.rainy': 'Rainy', 'cond.snowy': 'Snowy',
+    'cond.snowy-rainy': 'Sleet', 'cond.sunny': 'Sunny', 'cond.windy': 'Windy',
+    'cond.windy-variant': 'Windy',
+  },
+  nl: {
+    unavailable: 'Niet beschikbaar', unknown: 'Onbekend', missing: 'Ontbreekt',
+    offline: 'Offline',
+    on: 'Aan', off: 'Uit', turnOn: 'Aanzetten', turnOff: 'Uitzetten',
+    open: 'Open', closed: 'Gesloten', loading: 'Laden…', ok: 'OK',
+    close: 'Sluiten', increase: 'Verhogen', decrease: 'Verlagen',
+    'state.on': 'Aan', 'state.off': 'Uit', 'state.open': 'Open', 'state.closed': 'Gesloten',
+    'state.opening': 'Gaat open', 'state.closing': 'Gaat dicht',
+    'state.unavailable': 'Niet beschikbaar', 'state.unknown': 'Onbekend',
+    'state.home': 'Thuis', 'state.not_home': 'Afwezig',
+    'state.locked': 'Vergrendeld', 'state.unlocked': 'Ontgrendeld',
+    'state.locking': 'Vergrendelen', 'state.unlocking': 'Ontgrendelen',
+    'state.jammed': 'Geblokkeerd', 'state.idle': 'Inactief',
+    'state.playing': 'Speelt af', 'state.paused': 'Gepauzeerd', 'state.standby': 'Stand-by',
+    'state.buffering': 'Bufferen', 'state.cleaning': 'Schoonmaken', 'state.docked': 'Gedockt',
+    'state.returning': 'Keert terug', 'state.charging': 'Opladen',
+    'state.above_horizon': 'Boven de horizon', 'state.below_horizon': 'Onder de horizon',
+    daysShort: ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'],
+    daysLong: ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'],
+    months: ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus',
+      'september', 'oktober', 'november', 'december'],
+    longDate: (day, date, month) => `${day} ${date} ${month}`,
+    lightLow: 'Laag', lightMid: 'Half', lightFull: 'Vol',
+    onPct: (pct) => `Aan · ${pct}%`,
+    coverOpening: 'Gaat open', coverClosing: 'Gaat dicht',
+    coverPercentOpen: (pct) => `${pct}% open`,
+    coverOpen: 'Openen', coverStop: 'Stop', coverClose: 'Sluiten',
+    coverPresetOpen: 'Open', coverPresetHalf: 'Half', coverPresetShut: 'Dicht',
+    'hvac.heat': 'Verwarmen', 'hvac.cool': 'Koelen', 'hvac.heat_cool': 'Auto',
+    'hvac.auto': 'Auto', 'hvac.dry': 'Drogen', 'hvac.fan_only': 'Ventilator',
+    'action.heating': 'Verwarmt', 'action.cooling': 'Koelt', 'action.drying': 'Droogt',
+    'action.fan': 'Ventileert', 'action.idle': 'Inactief', 'action.off': 'Uit',
+    'action.preheating': 'Voorverwarmen', 'action.defrosting': 'Ontdooien',
+    climateNow: (temp) => `Nu ${temp}°`,
+    climateEco: 'Eco', climateDay: 'Dag', climateWarm: 'Warm',
+    mediaNothing: 'Er speelt niets', mediaPaused: 'Gepauzeerd', mediaPlaying: 'Speelt af',
+    mediaPausedLine: (sub) => `Gepauzeerd · ${sub}`,
+    mediaPrevious: 'Vorige', mediaPause: 'Pauze', mediaPlay: 'Afspelen', mediaNext: 'Volgende',
+    mediaStop: 'Stop',
+    detected: 'Gedetecteerd', clear: 'Vrij', wet: 'Nat', dry: 'Droog', problem: 'Probleem',
+    allClear: 'Alles in orde',
+    tapAgain: 'Tik nogmaals', run: 'Uitvoeren', cameraUnavailable: 'Camera niet beschikbaar',
+    'mode.home': 'Thuis', 'mode.away': 'Afwezig', 'mode.night': 'Nacht',
+    'mode.custom_bypass': 'Overbruggen', 'mode.vacation': 'Vakantie',
+    armIn: (mode) => `${mode} inschakelen`,
+    disarm: 'Uitschakelen', disarmed: 'Uitgeschakeld',
+    armedHome: 'Ingeschakeld thuis', armedAway: 'Ingeschakeld afwezig',
+    armedNight: 'Ingeschakeld nacht', armedVacation: 'Ingeschakeld vakantie',
+    armedBypass: 'Ingeschakeld (overbrugd)',
+    arming: 'Inschakelen…', disarming: 'Uitschakelen…', pending: 'In afwachting…',
+    triggered: 'ALARM',
+    changedBy: (who) => `door ${who}`,
+    enterCode: 'Voer de code in', wrongCode: 'Verkeerde code',
+    'cond.clear-night': 'Helder', 'cond.cloudy': 'Bewolkt', 'cond.exceptional': 'Extreem weer',
+    'cond.fog': 'Mist', 'cond.hail': 'Hagel', 'cond.lightning': 'Onweer',
+    'cond.lightning-rainy': 'Onweer, regen', 'cond.partlycloudy': 'Half bewolkt',
+    'cond.pouring': 'Stortregen', 'cond.rainy': 'Regen', 'cond.snowy': 'Sneeuw',
+    'cond.snowy-rainy': 'Natte sneeuw', 'cond.sunny': 'Zonnig', 'cond.windy': 'Winderig',
+    'cond.windy-variant': 'Winderig',
+  },
+  de: {
+    unavailable: 'Nicht verfügbar', unknown: 'Unbekannt', missing: 'Fehlt',
+    offline: 'Offline',
+    on: 'An', off: 'Aus', turnOn: 'Einschalten', turnOff: 'Ausschalten',
+    open: 'Offen', closed: 'Geschlossen', loading: 'Laden…', ok: 'OK',
+    close: 'Schließen', increase: 'Erhöhen', decrease: 'Verringern',
+    'state.on': 'An', 'state.off': 'Aus', 'state.open': 'Offen', 'state.closed': 'Geschlossen',
+    'state.opening': 'Öffnet', 'state.closing': 'Schließt',
+    'state.unavailable': 'Nicht verfügbar', 'state.unknown': 'Unbekannt',
+    'state.home': 'Zuhause', 'state.not_home': 'Abwesend',
+    'state.locked': 'Verriegelt', 'state.unlocked': 'Entriegelt', 'state.locking': 'Verriegeln',
+    'state.unlocking': 'Entriegeln', 'state.jammed': 'Blockiert', 'state.idle': 'Inaktiv',
+    'state.playing': 'Wiedergabe', 'state.paused': 'Pausiert', 'state.standby': 'Standby',
+    'state.buffering': 'Puffern', 'state.cleaning': 'Reinigt', 'state.docked': 'Angedockt',
+    'state.returning': 'Kehrt zurück', 'state.charging': 'Lädt',
+    'state.above_horizon': 'Über dem Horizont', 'state.below_horizon': 'Unter dem Horizont',
+    daysShort: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+    daysLong: ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'],
+    months: ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August',
+      'September', 'Oktober', 'November', 'Dezember'],
+    longDate: (day, date, month) => `${day}, ${date}. ${month}`,
+    lightLow: 'Niedrig', lightMid: 'Mittel', lightFull: 'Voll',
+    onPct: (pct) => `An · ${pct}%`,
+    coverOpening: 'Öffnet', coverClosing: 'Schließt',
+    coverPercentOpen: (pct) => `${pct}% offen`,
+    coverOpen: 'Öffnen', coverStop: 'Stopp', coverClose: 'Schließen',
+    coverPresetOpen: 'Offen', coverPresetHalf: 'Halb', coverPresetShut: 'Zu',
+    'hvac.heat': 'Heizen', 'hvac.cool': 'Kühlen', 'hvac.heat_cool': 'Auto', 'hvac.auto': 'Auto',
+    'hvac.dry': 'Trocknen', 'hvac.fan_only': 'Lüfter',
+    'action.heating': 'Heizt', 'action.cooling': 'Kühlt', 'action.drying': 'Trocknet',
+    'action.fan': 'Lüftet', 'action.idle': 'Leerlauf', 'action.off': 'Aus',
+    'action.preheating': 'Vorheizen', 'action.defrosting': 'Abtauen',
+    climateNow: (temp) => `Jetzt ${temp}°`,
+    climateEco: 'Eco', climateDay: 'Tag', climateWarm: 'Warm',
+    mediaNothing: 'Keine Wiedergabe', mediaPaused: 'Pausiert', mediaPlaying: 'Wiedergabe',
+    mediaPausedLine: (sub) => `Pausiert · ${sub}`,
+    mediaPrevious: 'Zurück', mediaPause: 'Pause', mediaPlay: 'Abspielen', mediaNext: 'Weiter',
+    mediaStop: 'Stopp',
+    detected: 'Erkannt', clear: 'Frei', wet: 'Nass', dry: 'Trocken', problem: 'Problem',
+    allClear: 'Alles in Ordnung',
+    tapAgain: 'Erneut tippen', run: 'Ausführen', cameraUnavailable: 'Kamera nicht verfügbar',
+    'mode.home': 'Zuhause', 'mode.away': 'Abwesend', 'mode.night': 'Nacht',
+    'mode.custom_bypass': 'Überbrücken', 'mode.vacation': 'Urlaub',
+    armIn: (mode) => `${mode} aktivieren`,
+    disarm: 'Deaktivieren', disarmed: 'Deaktiviert',
+    armedHome: 'Aktiviert zuhause', armedAway: 'Aktiviert abwesend',
+    armedNight: 'Aktiviert Nacht', armedVacation: 'Aktiviert Urlaub',
+    armedBypass: 'Aktiviert (überbrückt)',
+    arming: 'Aktiviere…', disarming: 'Deaktiviere…', pending: 'Ausstehend…',
+    triggered: 'ALARM',
+    changedBy: (who) => `von ${who}`,
+    enterCode: 'Code eingeben', wrongCode: 'Falscher Code',
+    'cond.clear-night': 'Klar', 'cond.cloudy': 'Bewölkt', 'cond.exceptional': 'Unwetter',
+    'cond.fog': 'Nebel', 'cond.hail': 'Hagel', 'cond.lightning': 'Gewitter',
+    'cond.lightning-rainy': 'Gewitter, Regen', 'cond.partlycloudy': 'Teilweise bewölkt',
+    'cond.pouring': 'Starkregen', 'cond.rainy': 'Regen', 'cond.snowy': 'Schnee',
+    'cond.snowy-rainy': 'Schneeregen', 'cond.sunny': 'Sonnig', 'cond.windy': 'Windig',
+    'cond.windy-variant': 'Windig',
+  },
+};
+
+/* `nl`, `nl-BE`, `de_AT`, `en-GB` -> the language; anything else -> en. */
+function langOf(hass) {
+  const raw = hass && ((hass.locale && hass.locale.language) || hass.language);
+  const base = String(raw || '').trim().toLowerCase().split(/[-_]/)[0];
+  return Object.prototype.hasOwnProperty.call(I18N, base) ? base : 'en';
+}
+
+/* A word in a language. A function entry takes the rest of the arguments
+   (`tr(lang, 'coverPercentOpen', 40)`); a key missing from a language falls
+   back to English rather than drawing nothing. */
+function tr(lang, key, ...args) {
+  const table = I18N[lang] || I18N.en;
+  let v = table[key];
+  if (v === undefined) v = I18N.en[key];
+  if (v === undefined) return key;
+  return typeof v === 'function' ? v(...args) : v;
+}
+
+/* One of HA's raw state ids as a word, or null when the table does not know
+   it - the caller decides how to show an id nobody translated. */
+function stateWord(lang, raw) {
+  const v = (I18N[lang] || I18N.en)['state.' + raw];
+  return v === undefined ? null : v;
+}
+
+/* Written only when it differs: for words built into the DOM once (the
+   Offline badge, preset chips), so the render that runs on every frame of a
+   drag leaves them alone unless the language actually changed. */
+function setText(el, text) {
+  if (el && el.textContent !== text) el.textContent = text;
 }
 
 /* Shared design tokens. One string, injected into every shadow root, so the
@@ -547,6 +785,11 @@ class NsSheet extends HTMLElement {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a',
       showLevel: true, enabled: true }, opts);
     this.style.setProperty('--ns-accent', cssColor(this._opts.accent));
+    // a singleton shared by every card, so the card opening it says the language
+    const lang = this._opts.lang;
+    this.shadowRoot.querySelector('.x').setAttribute('aria-label', tr(lang, 'close'));
+    this.shadowRoot.querySelector('.up').setAttribute('aria-label', tr(lang, 'increase'));
+    this.shadowRoot.querySelector('.down').setAttribute('aria-label', tr(lang, 'decrease'));
     this._title.textContent = opts.title || '';
     this._state.textContent = opts.state || '';
     this._binaryState.textContent = opts.state || '';
@@ -748,16 +991,39 @@ class NsBaseCard extends HTMLElement {
   set hass(hass) {
     const prev = this._hass;
     this._hass = hass;
+    // The user's language, resolved once per hass rather than once per word.
+    const lang = langOf(hass);
+    const relang = lang !== this._lang;
+    this._lang = lang;
     if (!this._config) return;
     // Diff down to the one entity we care about. HA pushes a new hass object on
     // every state change in the house; on this hardware that is the difference
-    // between a smooth panel and a stuttering one.
+    // between a smooth panel and a stuttering one. A language change is the
+    // one thing besides the entity that changes what the card says.
     const id = this._config.entity;
-    if (prev && prev.states[id] === hass.states[id]) return;
+    if (prev && !relang && prev.states[id] === hass.states[id]) return;
     this._sync(false);
   }
 
   get hass() { return this._hass; }
+
+  /* A word in the Home Assistant user's language. */
+  _t(key, ...args) { return tr(this._lang, key, ...args); }
+
+  /* A preset's label: its own name when it has one; a default preset carries
+     an `i18n` key instead, so "Low" reads "Laag" on a Dutch panel. */
+  _presetLabel(p, fallback) {
+    return p.i18n ? this._t(p.i18n) : (p.name || fallback);
+  }
+
+  /* The chips are built once in _build(); a language change relabels them. */
+  _labelChips(fallback) {
+    if (!this._elPresets) return;
+    const list = this._config.presets;
+    Array.from(this._elPresets.children).forEach((b, i) => {
+      if (list[i]) setText(b, this._presetLabel(list[i], fallback(list[i])));
+    });
+  }
 
   /* HA asks the class for its GUI editor; each card registers one under its
      own tag. See the editor section near the bottom of this file. */
@@ -963,9 +1229,9 @@ class NsPanelLightCard extends NsBaseCard {
 
   static get defaultPresets() {
     return [
-      { name: 'Low', brightness_pct: 15 },
-      { name: 'Mid', brightness_pct: 50 },
-      { name: 'Full', brightness_pct: 100 },
+      { name: 'Low', i18n: 'lightLow', brightness_pct: 15 },
+      { name: 'Mid', i18n: 'lightMid', brightness_pct: 50 },
+      { name: 'Full', i18n: 'lightFull', brightness_pct: 100 },
     ];
   }
 
@@ -1065,7 +1331,7 @@ class NsPanelLightCard extends NsBaseCard {
         const b = document.createElement('button');
         b.className = 'chip';
         b.type = 'button';
-        b.textContent = p.name || `${p.brightness_pct}%`;
+        b.textContent = this._presetLabel(p, `${p.brightness_pct}%`);
         b.addEventListener('click', (e) => {
           e.stopPropagation();
           this._haptic('light');
@@ -1129,13 +1395,13 @@ class NsPanelLightCard extends NsBaseCard {
   _sheetOptions() {
     const s = this._stateObj;
     const acts = this._presets().slice(0, 3).map((p) => ({
-      label: p.name || `${p.brightness_pct}%`,
+      label: this._presetLabel(p, `${p.brightness_pct}%`),
       icon: p.icon || 'mdi:lightbulb-on-outline',
       enabled: lightPresetAllowed(s, p),
       run: () => this._applyPreset(p),
     }));
     acts.push({
-      label: isOn(s) ? 'Turn off' : 'Turn on',
+      label: this._t(isOn(s) ? 'turnOff' : 'turnOn'),
       icon: isOn(s) ? 'mdi:lightbulb-off' : 'mdi:lightbulb-on',
       primary: true,
       run: () => {
@@ -1144,7 +1410,8 @@ class NsPanelLightCard extends NsBaseCard {
     });
     return {
       title: this._title(),
-      state: isBroken(s) ? 'Unavailable' : (isOn(s) ? 'On' : 'Off'),
+      state: this._t(isBroken(s) ? 'unavailable' : (isOn(s) ? 'on' : 'off')),
+      lang: this._lang,
       showLevel: this._canDrag(),
       enabled: !isBroken(s),
       onClose: () => { this._sheetOpen = false; },
@@ -1187,7 +1454,10 @@ class NsPanelLightCard extends NsBaseCard {
     this._elValue.style.display = dimmable && on ? '' : 'none';
     const label = dimmable && on ? `${pct}` : '';
     if (this._elValue.firstChild.nodeType === Node.TEXT_NODE) this._elValue.firstChild.textContent = label;
-    this._elSub.textContent = broken ? 'Unavailable' : (on ? (dimmable ? `On · ${pct}%` : 'On') : 'Off');
+    this._elSub.textContent = broken ? this._t('unavailable')
+      : (on ? (dimmable ? this._t('onPct', pct) : this._t('on')) : this._t('off'));
+    setText(this._elBadge, this._t('offline'));
+    this._labelChips((p) => `${p.brightness_pct}%`);
     this._elPresets.style.display = cfg.show_presets && this._presets().length ? '' : 'none';
     Array.from(this._elPresets.children).forEach((button, i) => {
       button.disabled = !lightPresetAllowed(s, cfg.presets[i]);
@@ -1215,9 +1485,9 @@ class NsPanelCoverCard extends NsBaseCard {
 
   static get defaultPresets() {
     return [
-      { name: 'Open', position: 100 },
-      { name: 'Half', position: 50 },
-      { name: 'Shut', position: 0 },
+      { name: 'Open', i18n: 'coverPresetOpen', position: 100 },
+      { name: 'Half', i18n: 'coverPresetHalf', position: 50 },
+      { name: 'Shut', i18n: 'coverPresetShut', position: 0 },
     ];
   }
 
@@ -1292,7 +1562,7 @@ class NsPanelCoverCard extends NsBaseCard {
         const b = document.createElement('button');
         b.className = 'chip';
         b.type = 'button';
-        b.textContent = p.name || `${p.position}%`;
+        b.textContent = this._presetLabel(p, `${p.position}%`);
         b.addEventListener('click', (e) => {
           e.stopPropagation();
           this._haptic('light');
@@ -1335,12 +1605,15 @@ class NsPanelCoverCard extends NsBaseCard {
       value: this._displayValue(),
       fromTop: true,
       accent: this._accent(),
+      lang: this._lang,
       step: this._config.step,
       actions: [
-        { label: 'Open', icon: 'mdi:arrow-up', run: () => this._call('cover', 'open_cover') },
-        { label: 'Stop', icon: 'mdi:stop', primary: true, close: false,
+        { label: this._t('coverOpen'), icon: 'mdi:arrow-up',
+          run: () => this._call('cover', 'open_cover') },
+        { label: this._t('coverStop'), icon: 'mdi:stop', primary: true, close: false,
           run: () => this._call('cover', 'stop_cover') },
-        { label: 'Close', icon: 'mdi:arrow-down', run: () => this._call('cover', 'close_cover') },
+        { label: this._t('coverClose'), icon: 'mdi:arrow-down',
+          run: () => this._call('cover', 'close_cover') },
       ],
       onInput: (v) => {
         this._local = v;
@@ -1353,11 +1626,13 @@ class NsPanelCoverCard extends NsBaseCard {
 
   _stateText(s, pct) {
     if (!s) return '';
-    if (s.state === 'opening') return 'Opening';
-    if (s.state === 'closing') return 'Closing';
+    if (s.state === 'opening') return this._t('coverOpening');
+    if (s.state === 'closing') return this._t('coverClosing');
     const p = pct === undefined ? s.attributes.current_position : pct;
-    if (typeof p === 'number') return p >= 99 ? 'Open' : (p <= 0 ? 'Closed' : `${p}% open`);
-    return s.state === 'open' ? 'Open' : 'Closed';
+    if (typeof p === 'number') {
+      return p >= 99 ? this._t('open') : (p <= 0 ? this._t('closed') : this._t('coverPercentOpen', p));
+    }
+    return this._t(s.state === 'open' ? 'open' : 'closed');
   }
 
   _render() {
@@ -1382,12 +1657,16 @@ class NsPanelCoverCard extends NsBaseCard {
       (pct >= 99 ? 'mdi:blinds-open' : pct <= 0 ? 'mdi:blinds' : 'mdi:blinds-horizontal'));
     this._elName.textContent = this._title();
 
-    if (this._valueShown !== pct || this._movingShown !== moving) {
+    if (this._valueShown !== pct || this._movingShown !== moving ||
+        this._langShown !== this._lang) {
       this._valueShown = pct;
       this._movingShown = moving;
+      this._langShown = this._lang;
       this._elValue.innerHTML = broken ? '&mdash;' : `${pct}<small>%</small>`;
-      this._elSub.textContent = broken ? 'Unavailable' : this._stateText(s, pct);
+      this._elSub.textContent = broken ? this._t('unavailable') : this._stateText(s, pct);
     }
+    setText(this._elBadge, this._t('offline'));
+    this._labelChips((p) => `${p.position}%`);
   }
 }
 
@@ -1673,9 +1952,13 @@ class NsInfoCard extends HTMLElement {
   set hass(hass) {
     const prev = this._hass;
     this._hass = hass;
+    // resolved once per hass; a change of language re-renders like a state would
+    const lang = langOf(hass);
+    const relang = lang !== this._lang;
+    this._lang = lang;
     if (!this._config) return;
     this._afterHass(prev);
-    if (prev) {
+    if (prev && !relang) {
       const ids = this._entityIds();
       let changed = false;
       for (let i = 0; i < ids.length; i++) {
@@ -1706,6 +1989,9 @@ class NsInfoCard extends HTMLElement {
   }
 
   _state(id) { return this._hass ? this._hass.states[id] : null; }
+
+  /* A word in the Home Assistant user's language. */
+  _t(key, ...args) { return tr(this._lang, key, ...args); }
 
   _accent() { return cssColor(this._config.accent || this.constructor.accent); }
 
@@ -1865,8 +2151,9 @@ class NsPanelSensorCard extends NsInfoCard {
       this._elValue.innerHTML = unit && !broken ? `${text}<small>${unit}</small>` : text;
     }
 
+    setText(this._elBadge, this._t('offline'));
     const sec = cfg.secondary ? this._state(cfg.secondary) : null;
-    const subText = broken ? 'Unavailable'
+    const subText = broken ? this._t('unavailable')
       : (sec ? `${friendly(sec, cfg.secondary)} ${fmt(numeric(sec), null)}${unitOf(sec)}` : '');
     if (this._subShown !== subText) {
       this._subShown = subText;
@@ -2068,7 +2355,8 @@ class NsPanelButtonCard extends NsInfoCard {
   static get defaultOptions() {
     return {
       buttons: [], columns: 2, haptics: true, confirm: false,
-      confirm_text: 'Tap again', feedback_ms: 1200, more_info: true, show_name: true,
+      // null: "Tap again" in the user's language
+      confirm_text: null, feedback_ms: 1200, more_info: true, show_name: true,
     };
   }
 
@@ -2145,7 +2433,7 @@ class NsPanelButtonCard extends NsInfoCard {
 
   _label(item) {
     const s = item.entity ? this._state(item.entity) : null;
-    return item.name || friendly(s, item.entity) || 'Run';
+    return item.name || friendly(s, item.entity) || this._t('run');
   }
 
   _icon(item) {
@@ -2175,7 +2463,8 @@ class NsPanelButtonCard extends NsInfoCard {
     if (wants && !b.armed) {
       b.armed = true;
       b.el.classList.add('ask');
-      b.label.textContent = b.item.confirm_text || this._config.confirm_text;
+      b.label.textContent = b.item.confirm_text ||
+        (this._config.confirm_text == null ? this._t('tapAgain') : this._config.confirm_text);
       this._later(() => {
         b.armed = false;
         b.el.classList.remove('ask');
@@ -2304,7 +2593,8 @@ class NsPanelSwitchCard extends NsInfoCard {
   static get defaultOptions() {
     return {
       switches: [], columns: 2, haptics: true, echo_ms: 1500,
-      on_text: 'On', off_text: 'Off', more_info: true, show_name: true, show_state: true,
+      // null: On / Off in the user's language
+      on_text: null, off_text: null, more_info: true, show_name: true, show_state: true,
     };
   }
 
@@ -2504,8 +2794,9 @@ class NsPanelSwitchCard extends NsInfoCard {
       if (broken) b.el.setAttribute('disabled', ''); else b.el.removeAttribute('disabled');
       b.icon.setAttribute('icon', broken ? 'mdi:alert-circle-outline' : this._icon(b, on));
       b.label.textContent = b.item.name || friendly(s, b.item.entity);
-      b.state.textContent = broken ? 'Unavailable'
-        : (on ? this._config.on_text : this._config.off_text);
+      const own = on ? this._config.on_text : this._config.off_text;
+      b.state.textContent = broken ? this._t('unavailable')
+        : (own == null ? this._t(on ? 'on' : 'off') : own);
     });
   }
 }
@@ -2518,26 +2809,26 @@ class NsPanelSwitchCard extends NsInfoCard {
  * the card itself tinted when it has gone off.
  * ================================================================== */
 
-/* key, label, service, supported_features bit, icon */
+/* key, label (an I18N key), service, supported_features bit, icon */
 const ALARM_MODES = [
-  ['home', 'Home', 'alarm_arm_home', 1, 'mdi:shield-home'],
-  ['away', 'Away', 'alarm_arm_away', 2, 'mdi:shield-lock'],
-  ['night', 'Night', 'alarm_arm_night', 4, 'mdi:shield-moon'],
-  ['custom_bypass', 'Bypass', 'alarm_arm_custom_bypass', 16, 'mdi:shield-half-full'],
-  ['vacation', 'Vacation', 'alarm_arm_vacation', 32, 'mdi:shield-airplane'],
+  ['home', 'mode.home', 'alarm_arm_home', 1, 'mdi:shield-home'],
+  ['away', 'mode.away', 'alarm_arm_away', 2, 'mdi:shield-lock'],
+  ['night', 'mode.night', 'alarm_arm_night', 4, 'mdi:shield-moon'],
+  ['custom_bypass', 'mode.custom_bypass', 'alarm_arm_custom_bypass', 16, 'mdi:shield-half-full'],
+  ['vacation', 'mode.vacation', 'alarm_arm_vacation', 32, 'mdi:shield-airplane'],
 ];
 
-/* label, colour (null = the card's accent), icon */
+/* label (an I18N key), colour (null = the card's accent), icon */
 const ALARM_LOOK = {
-  disarmed: ['Disarmed', null, 'mdi:shield-off-outline'],
-  armed_home: ['Armed home', '#f87171', 'mdi:shield-home'],
-  armed_away: ['Armed away', '#f87171', 'mdi:shield-lock'],
-  armed_night: ['Armed night', '#f87171', 'mdi:shield-moon'],
-  armed_vacation: ['Armed vacation', '#f87171', 'mdi:shield-airplane'],
-  armed_custom_bypass: ['Armed (bypass)', '#f87171', 'mdi:shield-half-full'],
-  arming: ['Arming\u2026', '#ffb74a', 'mdi:shield-sync'],
-  pending: ['Pending\u2026', '#ffb74a', 'mdi:shield-alert'],
-  triggered: ['TRIGGERED', '#f87171', 'mdi:bell-ring'],
+  disarmed: ['disarmed', null, 'mdi:shield-off-outline'],
+  armed_home: ['armedHome', '#f87171', 'mdi:shield-home'],
+  armed_away: ['armedAway', '#f87171', 'mdi:shield-lock'],
+  armed_night: ['armedNight', '#f87171', 'mdi:shield-moon'],
+  armed_vacation: ['armedVacation', '#f87171', 'mdi:shield-airplane'],
+  armed_custom_bypass: ['armedBypass', '#f87171', 'mdi:shield-half-full'],
+  arming: ['arming', '#ffb74a', 'mdi:shield-sync'],
+  pending: ['pending', '#ffb74a', 'mdi:shield-alert'],
+  triggered: ['triggered', '#f87171', 'mdi:bell-ring'],
 };
 
 const ALARM_CSS = `
@@ -2631,6 +2922,7 @@ class NsPanelAlarmCard extends NsInfoCard {
     const a = (this._stateObj && this._stateObj.attributes) || {};
     keypad().open({
       title: label,
+      lang: this._lang,
       accent: this._accent(),
       text: a.code_format === 'text',
       onSubmit: (code) => this._send(service, code),
@@ -2647,7 +2939,8 @@ class NsPanelAlarmCard extends NsInfoCard {
     if (!this._hass) return Promise.resolve(false);
     const data = { entity_id: this._config.entity };
     if (code !== null && code !== undefined) data.code = code;
-    this._pendingLabel = service === 'alarm_disarm' ? 'Disarming…' : 'Arming…';
+    // a key, not the words, so a language change in between still reads right
+    this._pendingLabel = service === 'alarm_disarm' ? 'disarming' : 'arming';
     this._scheduleRender();
     this._later(() => { this._pendingLabel = null; this._scheduleRender(); },
       2 * (this._config.echo_ms || 1500));
@@ -2686,16 +2979,18 @@ class NsPanelAlarmCard extends NsInfoCard {
   /* The button row is rebuilt only when what it should hold changes -
      disarmed vs not, and which modes - so a state tick never touches it. */
   _buttons(disarmed, modes, broken) {
-    const key = broken ? 'none' : (disarmed ? 'arm:' + modes.map((m) => m[0]).join(',') : 'disarm');
+    // the language is part of what the row holds: its buttons carry words
+    const key = (broken ? 'none'
+      : (disarmed ? 'arm:' + modes.map((m) => m[0]).join(',') : 'disarm')) + '|' + this._lang;
     if (key === this._rowKey) return;
     this._rowKey = key;
     this._row.innerHTML = '';
     if (broken) { this._row.removeAttribute('data-n'); return; }
     const items = disarmed
-      ? modes.map((m) => ({ icon: m[4], label: m[1], service: m[2], arming: true,
-        title: 'Arm ' + m[1].toLowerCase() }))
-      : [{ icon: 'mdi:shield-off-outline', label: 'Disarm', service: 'alarm_disarm',
-        arming: false, title: 'Disarm' }];
+      ? modes.map((m) => ({ icon: m[4], label: this._t(m[1]), service: m[2], arming: true,
+        title: this._t('armIn', this._t(m[1])) }))
+      : [{ icon: 'mdi:shield-off-outline', label: this._t('disarm'), service: 'alarm_disarm',
+        arming: false, title: this._t('disarm') }];
     this._row.setAttribute('data-n', String(items.length));
     items.forEach((it) => {
       const b = document.createElement('button');
@@ -2710,7 +3005,7 @@ class NsPanelAlarmCard extends NsInfoCard {
     if (!this._card) return;
     const s = this._stateObj;
     const broken = !s || s.state === 'unavailable' || s.state === 'unknown';
-    const look = (!broken && ALARM_LOOK[s.state]) || ['Unavailable', '#98a1b0', 'mdi:alert-circle-outline'];
+    const look = (!broken && ALARM_LOOK[s.state]) || ['unavailable', '#98a1b0', 'mdi:alert-circle-outline'];
     const color = look[1] || this._accent();
     if (s && s.state !== this._lastState) { this._lastState = s.state; this._pendingLabel = null; }
 
@@ -2719,9 +3014,9 @@ class NsPanelAlarmCard extends NsInfoCard {
     this._card.classList.toggle('broken', broken);
     // `icon` is the resting (disarmed) icon; the armed and alarm states keep their own
     this._icon.setAttribute('icon', (!broken && s.state === 'disarmed' && this._config.icon) || look[2]);
-    this._st.textContent = this._pendingLabel || look[0];
+    this._st.textContent = this._t(this._pendingLabel || look[0]);
     const by = s && s.attributes && s.attributes.changed_by;
-    this._sub.textContent = this._title() + (by ? ' \u00b7 by ' + by : '');
+    this._sub.textContent = this._title() + (by ? ' \u00b7 ' + this._t('changedBy', by) : '');
     this._buttons(!broken && s.state === 'disarmed', this._modes(), broken);
   }
 }
@@ -2817,12 +3112,16 @@ class NsKeypad extends HTMLElement {
     this._ok.addEventListener('click', () => this._submit());
   }
 
-  /* opts: {title, hint, accent, text, onSubmit(code) -> Promise<bool>} */
+  /* opts: {title, hint, lang, accent, text, onSubmit(code) -> Promise<bool>} */
   open(opts) {
-    this._opts = Object.assign({ hint: 'Enter the code', accent: '#8ddba4', text: false }, opts);
+    // a singleton, like the sheet: the card opening it says the language
+    const lang = (opts && opts.lang) || 'en';
+    this._opts = Object.assign({ hint: tr(lang, 'enterCode'), accent: '#8ddba4', text: false },
+      opts, { lang });
     this.style.setProperty('--ns-accent', cssColor(this._opts.accent));
+    this.shadowRoot.querySelector('.x').setAttribute('aria-label', tr(lang, 'close'));
     this._title.textContent = this._opts.title || '';
-    this._ok.textContent = this._opts.title || 'OK';
+    this._ok.textContent = this._opts.title || tr(lang, 'ok');
     this._wrap.classList.toggle('text', !!this._opts.text);
     this._code = '';
     this._input.value = '';
@@ -2850,7 +3149,7 @@ class NsKeypad extends HTMLElement {
   get _entered() { return this._opts && this._opts.text ? this._input.value : this._code; }
 
   _setHint(wrong) {
-    this._hint.textContent = wrong ? 'Wrong code' : this._opts.hint;
+    this._hint.textContent = wrong ? tr(this._opts.lang, 'wrongCode') : this._opts.hint;
     this._hint.classList.toggle('wrong', wrong);
     this._dots.classList.toggle('wrong', wrong);
   }
@@ -2884,7 +3183,7 @@ class NsKeypad extends HTMLElement {
     this._draw();
     Promise.resolve(this._opts.onSubmit(code)).then((ok) => {
       this._busy = false;
-      this._ok.textContent = this._opts.title || 'OK';
+      this._ok.textContent = this._opts.title || tr(this._opts.lang, 'ok');
       if (ok) { this.close(); return; }
       this._code = '';
       this._input.value = '';
@@ -2927,7 +3226,8 @@ class NsPanelStatusCard extends NsInfoCard {
   static get requiresEntity() { return false; }
   static get accent() { return '#f0a03c'; }
   static get defaultOptions() {
-    return { entities: [], only_problems: false, columns: 2, all_clear: 'All clear' };
+    // all_clear null: "All clear" in the user's language
+    return { entities: [], only_problems: false, columns: 2, all_clear: null };
   }
 
   /* 1, 2 or 3 across. More than 3 on a Pro 86's 480px page is a list of things
@@ -2969,21 +3269,24 @@ class NsPanelStatusCard extends NsInfoCard {
   }
 
   _stateLabel(item, s) {
-    if (!s) return 'Missing';
-    if (s.state === 'unavailable') return 'Unavailable';
-    if (s.state === 'unknown') return 'Unknown';
+    const t = (key) => this._t(key);
+    if (!s) return t('missing');
+    if (s.state === 'unavailable') return t('unavailable');
+    if (s.state === 'unknown') return t('unknown');
     if (item.entity.split('.')[0] === 'binary_sensor') {
       const c = deviceClass(s);
       const on = s.state === 'on';
       if (c === 'door' || c === 'window' || c === 'garage_door' || c === 'opening') {
-        return on ? 'Open' : 'Closed';
+        return t(on ? 'open' : 'closed');
       }
-      if (c === 'motion' || c === 'occupancy') return on ? 'Detected' : 'Clear';
-      if (c === 'moisture') return on ? 'Wet' : 'Dry';
-      if (c === 'problem') return on ? 'Problem' : 'OK';
-      return on ? 'On' : 'Off';
+      if (c === 'motion' || c === 'occupancy') return t(on ? 'detected' : 'clear');
+      if (c === 'moisture') return t(on ? 'wet' : 'dry');
+      if (c === 'problem') return t(on ? 'problem' : 'ok');
+      return t(on ? 'on' : 'off');
     }
-    return s.state.charAt(0).toUpperCase() + s.state.slice(1).replace(/_/g, ' ');
+    // HA's common ids in words; anything else de-slugged, as it always was
+    return stateWord(this._lang, s.state) ||
+      s.state.charAt(0).toUpperCase() + s.state.slice(1).replace(/_/g, ' ');
   }
 
   _build() {
@@ -3005,7 +3308,7 @@ class NsPanelStatusCard extends NsInfoCard {
     this._grid.style.setProperty('--ns-cols', String(this._columns));
     this._grid.setAttribute('data-cols', String(this._columns));
     this._clear = this.shadowRoot.querySelector('.clear');
-    this._clear.querySelector('div').textContent = this._config.all_clear;
+    this._clearText = this._clear.querySelector('div');
 
     // Every tile is built once and hidden when not shown. Rebuilding the grid
     // on each state change would be the one expensive thing this card could do.
@@ -3054,6 +3357,8 @@ class NsPanelStatusCard extends NsInfoCard {
       t.sub.textContent = this._stateLabel(t.item, s);
     });
     const showClear = this._config.only_problems && problems === 0;
+    const allClear = this._config.all_clear;
+    setText(this._clearText, allClear == null ? this._t('allClear') : String(allClear));
     this._clear.hidden = !showClear;
     this._grid.hidden = showClear;
   }
@@ -3078,14 +3383,15 @@ const HVAC_ICONS = {
   fan_only: 'mdi:fan',
 };
 
+/* The modes the sheet offers, each as its I18N key. */
 const HVAC_LABELS = {
-  off: 'Off',
-  heat: 'Heat',
-  cool: 'Cool',
-  heat_cool: 'Auto',
-  auto: 'Auto',
-  dry: 'Dry',
-  fan_only: 'Fan',
+  off: 'off',
+  heat: 'hvac.heat',
+  cool: 'hvac.cool',
+  heat_cool: 'hvac.heat_cool',
+  auto: 'hvac.auto',
+  dry: 'hvac.dry',
+  fan_only: 'hvac.fan_only',
 };
 
 class NsPanelClimateCard extends NsBaseCard {
@@ -3099,9 +3405,9 @@ class NsPanelClimateCard extends NsBaseCard {
   }
   static get defaultPresets() {
     return [
-      { name: 'Eco', temperature: 17 },
-      { name: 'Day', temperature: 20.5 },
-      { name: 'Warm', temperature: 22 },
+      { name: 'Eco', i18n: 'climateEco', temperature: 17 },
+      { name: 'Day', i18n: 'climateDay', temperature: 20.5 },
+      { name: 'Warm', i18n: 'climateWarm', temperature: 22 },
     ];
   }
 
@@ -3192,7 +3498,7 @@ class NsPanelClimateCard extends NsBaseCard {
       cfg.presets.slice(0, 4).forEach((p) => {
         const b = document.createElement('button');
         b.className = 'chip';
-        b.textContent = p.name;
+        b.textContent = this._presetLabel(p, '');
         b.addEventListener('click', (e) => { e.stopPropagation(); this._applyPreset(p); });
         this._elPresets.appendChild(b);
       });
@@ -3228,7 +3534,7 @@ class NsPanelClimateCard extends NsBaseCard {
   _openSheet() {
     const s = this._stateObj;
     const acts = this._hvacModes().map((m) => ({
-      label: HVAC_LABELS[m],
+      label: this._t(HVAC_LABELS[m]),
       icon: HVAC_ICONS[m],
       primary: s && s.state === m,
       run: () => this._call('climate', 'set_hvac_mode', { hvac_mode: m }),
@@ -3239,6 +3545,7 @@ class NsPanelClimateCard extends NsBaseCard {
       state: this._stateText(s),
       value: this._displayValue(),
       accent: this._accent(),
+      lang: this._lang,
       step: (this._config.step / (this._range().max - this._range().min)) * 100,
       format: (v) => `${fmt(this._degrees(v), 1)}°`,
       actions: acts,
@@ -3255,10 +3562,12 @@ class NsPanelClimateCard extends NsBaseCard {
     if (!s) return '';
     const a = s.attributes || {};
     const now = typeof a.current_temperature === 'number'
-      ? `Now ${fmt(a.current_temperature, 1)}°` : '';
-    const action = a.hvac_action
-      ? a.hvac_action.charAt(0).toUpperCase() + a.hvac_action.slice(1)
-      : (HVAC_LABELS[s.state] || s.state);
+      ? this._t('climateNow', fmt(a.current_temperature, 1)) : '';
+    const act = a.hvac_action;
+    const action = act
+      ? (I18N.en['action.' + act] ? this._t('action.' + act)
+        : stateWord(this._lang, act) || act.charAt(0).toUpperCase() + act.slice(1))
+      : (HVAC_LABELS[s.state] ? this._t(HVAC_LABELS[s.state]) : s.state);
     return now ? `${now} · ${action}` : action;
   }
 
@@ -3282,12 +3591,14 @@ class NsPanelClimateCard extends NsBaseCard {
       HVAC_ICONS[s ? s.state : 'off'] || 'mdi:thermostat');
     this._elName.textContent = this._title();
 
-    const stamp = `${target}|${off}|${broken}`;
+    const stamp = `${target}|${off}|${broken}|${this._lang}`;
     if (this._shown !== stamp) {
       this._shown = stamp;
       this._elValue.innerHTML = broken || off ? '' : `${fmt(target, 1)}<small>&deg;</small>`;
-      this._elSub.textContent = broken ? 'Unavailable' : this._stateText(s);
+      this._elSub.textContent = broken ? this._t('unavailable') : this._stateText(s);
     }
+    setText(this._elBadge, this._t('offline'));
+    this._labelChips(() => '');
   }
 }
 
@@ -3427,14 +3738,15 @@ class NsPanelMediaCard extends NsBaseCard {
     const s = this._stateObj;
     const a = (s && s.attributes) || {};
     const device = this._title();
-    if (isBroken(s)) return { top: device, sub: 'Unavailable' };
+    if (isBroken(s)) return { top: device, sub: this._t('unavailable') };
     if (this._idle()) {
-      return { top: device, sub: s && s.state === 'off' ? 'Off' : 'Nothing playing' };
+      return { top: device, sub: this._t(s && s.state === 'off' ? 'off' : 'mediaNothing') };
     }
     const top = a.media_title || device;
     const sub = a.media_artist || a.media_series_title || a.media_channel ||
-      a.media_album_name || (a.media_title ? device : (s.state === 'paused' ? 'Paused' : 'Playing'));
-    return { top, sub: s.state === 'paused' ? `Paused · ${sub}` : sub };
+      a.media_album_name ||
+      (a.media_title ? device : this._t(s.state === 'paused' ? 'mediaPaused' : 'mediaPlaying'));
+    return { top, sub: s.state === 'paused' ? this._t('mediaPausedLine', sub) : sub };
   }
 
   _defaultIcon() {
@@ -3525,25 +3837,25 @@ class NsPanelMediaCard extends NsBaseCard {
     const s = this._stateObj;
     const acts = [];
     if (this._supports(MP_PREV)) {
-      acts.push({ label: 'Previous', icon: 'mdi:skip-previous',
+      acts.push({ label: this._t('mediaPrevious'), icon: 'mdi:skip-previous',
         close: false, run: () => this._call('media_player', 'media_previous_track') });
     }
     acts.push({
-      label: this._playing() ? 'Pause' : 'Play',
+      label: this._t(this._playing() ? 'mediaPause' : 'mediaPlay'),
       icon: this._playing() ? 'mdi:pause' : 'mdi:play',
       primary: true,
       close: false,
       run: () => this._call('media_player', 'media_play_pause'),
     });
     if (this._supports(MP_NEXT)) {
-      acts.push({ label: 'Next', icon: 'mdi:skip-next',
+      acts.push({ label: this._t('mediaNext'), icon: 'mdi:skip-next',
         close: false, run: () => this._call('media_player', 'media_next_track') });
     }
     if (this._supports(MP_STOP)) {
-      acts.push({ label: 'Stop', icon: 'mdi:stop',
+      acts.push({ label: this._t('mediaStop'), icon: 'mdi:stop',
         run: () => this._call('media_player', 'media_stop') });
     } else if (this._supports(MP_TURN_OFF)) {
-      acts.push({ label: 'Off', icon: 'mdi:power',
+      acts.push({ label: this._t('off'), icon: 'mdi:power',
         run: () => this._call('media_player', 'turn_off') });
     }
 
@@ -3553,6 +3865,7 @@ class NsPanelMediaCard extends NsBaseCard {
       state: lines.sub,
       value: this._displayValue(),
       accent: this._accent(),
+      lang: this._lang,
       step: this._config.step,
       actions: acts.slice(0, 4),
       onInput: (v) => {
@@ -3604,6 +3917,7 @@ class NsPanelMediaCard extends NsBaseCard {
       this._elName.textContent = lines.top;
       this._elSub.textContent = lines.sub;
     }
+    setText(this._elBadge, this._t('offline'));
 
     if (this._buttons) {
       const playing = this._playing();
@@ -3647,18 +3961,12 @@ const WEATHER_ICONS = {
   exceptional: 'mdi:alert-circle-outline',
 };
 
-/* The HA condition slugs that do not survive a naive de-slugging. */
-const CONDITION_LABELS = {
-  partlycloudy: 'Partly cloudy',
-  'clear-night': 'Clear',
-  'lightning-rainy': 'Thunder, rain',
-  'snowy-rainy': 'Sleet',
-  'windy-variant': 'Windy',
-  pouring: 'Heavy rain',
-  exceptional: 'Severe',
-};
-
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/* A condition in words: HA's own slugs are all in I18N as `cond.<slug>`;
+   one HA has not invented yet is de-slugged, the way it always was. */
+function conditionLabel(lang, slug) {
+  const v = (I18N[lang] || I18N.en)['cond.' + slug];
+  return v !== undefined ? v : slug.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+}
 
 /* The rain in one forecast entry, as short as a tile allows: "80% · 1.2mm",
    "3% · 0mm", "40%". Null when the provider sends neither. `wet` is worth
@@ -3788,15 +4096,13 @@ class NsPanelWeatherCard extends NsInfoCard {
     this._elValue.innerHTML = temp === null ? '—' : `${fmt(temp, 0)}<small>${unit}</small>`;
 
     const bits = [];
-    if (s && s.state) {
-      bits.push(CONDITION_LABELS[s.state] ||
-        s.state.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase()));
-    }
+    if (s && s.state) bits.push(conditionLabel(this._lang, s.state));
     if (typeof a.humidity === 'number') bits.push(`${fmt(a.humidity, 0)}%`);
     if (typeof a.wind_speed === 'number') {
       bits.push(`${fmt(a.wind_speed, 0)} ${a.wind_speed_unit || ''}`.trim());
     }
-    this._elSub.textContent = broken ? 'Unavailable' : bits.join(' · ');
+    this._elSub.textContent = broken ? this._t('unavailable') : bits.join(' · ');
+    setText(this._elBadge, this._t('offline'));
 
     this._renderForecast(unit, a.precipitation_unit || 'mm');
   }
@@ -3807,10 +4113,12 @@ class NsPanelWeatherCard extends NsInfoCard {
   _renderForecast(unit, rainUnit) {
     const list = this._config.show_forecast ? this._forecastList() : [];
     const rainy = !!this._config.show_precipitation;
-    const stamp = JSON.stringify(list.map((f) => [f.datetime, f.condition,
+    // the day names are words, so the language is part of what was drawn
+    const stamp = this._lang + JSON.stringify(list.map((f) => [f.datetime, f.condition,
       f.temperature, f.templow, rainy && f.precipitation, rainy && f.precipitation_probability]));
     if (stamp === this._fcShown) return;
     this._fcShown = stamp;
+    const days = this._t('daysShort');
 
     this._elFc.hidden = !list.length;
     this._elFc.innerHTML = '';
@@ -3821,7 +4129,7 @@ class NsPanelWeatherCard extends NsInfoCard {
       const label = when
         ? (this._config.forecast_type === 'hourly'
           ? String(when.getHours()).padStart(2, '0')
-          : DAY_NAMES[when.getDay()])
+          : days[when.getDay()])
         : '';
       const low = typeof f.templow === 'number' ? `<span>${fmt(f.templow, 0)}</span>` : '';
       d.innerHTML =
@@ -3847,11 +4155,6 @@ class NsPanelWeatherCard extends NsInfoCard {
  * time is doing something useful for free. One timer, aligned to the top of
  * the minute so the digits change when they should, writing textContent.
  * ================================================================== */
-
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
-  'August', 'September', 'October', 'November', 'December'];
-const DAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
-  'Friday', 'Saturday'];
 
 class NsPanelClockCard extends NsInfoCard {
   static get cardType() { return 'nspanel-clock-card'; }
@@ -3932,8 +4235,9 @@ class NsPanelClockCard extends NsInfoCard {
 
     this._elDate.hidden = !cfg.show_date;
     if (cfg.show_date) {
-      this._elDate.textContent =
-        `${DAYS_LONG[now.getDay()]} ${now.getDate()} ${MONTHS[now.getMonth()]}`;
+      // "Monday 13 November", "maandag 13 november", "Montag, 13. November"
+      this._elDate.textContent = this._t('longDate', this._t('daysLong')[now.getDay()],
+        now.getDate(), this._t('months')[now.getMonth()]);
     }
 
     const s = cfg.entity ? this._state(cfg.entity) : null;
@@ -4619,7 +4923,8 @@ const ALARM_SCHEMA = [
     name: 'modes', selector: {
       select: {
         multiple: true, mode: 'list',
-        options: ALARM_MODES.map((m) => ({ value: m[0], label: m[1] })),
+        // the editor stays English; m[1] is an I18N key now
+        options: ALARM_MODES.map((m) => ({ value: m[0], label: tr('en', m[1]) })),
       },
     },
   },
@@ -4891,7 +5196,7 @@ class NsPanelCameraCard extends NsInfoCard {
     this._elLabel.hidden = !show;
     this._elScrim.hidden = !show || this._img.hidden;
     this._elLabel.textContent = this._title();
-    this._elEmptyText.textContent = gone ? 'Camera unavailable' : 'Loading\u2026';
+    this._elEmptyText.textContent = this._t(gone ? 'cameraUnavailable' : 'loading');
     // the first hass is when the camera's token arrives
     if (this._visible && !this._waiting && !this._timer) this._poll();
   }

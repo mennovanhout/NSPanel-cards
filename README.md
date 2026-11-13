@@ -80,6 +80,19 @@ It starts with installing these cards.
 Gestures apply to the control cards. The information cards are read-only: a tap opens HA's
 more-info dialog, which is where history and settings already live.
 
+## Language
+
+The cards speak the language of the Home Assistant user looking at them (Profile →
+Language): **English**, **Nederlands** or **Deutsch**. Regional variants count as the base
+language (`nl-BE` is Dutch, `de-AT` German); any other language falls back to English. That
+covers everything the cards draw themselves — states, buttons, the long-press sheet, the
+keypad, weather conditions, day and month names, the clock's date — and the default preset
+names (`Low`/`Mid`/`Full`, `Open`/`Half`/`Shut`, `Eco`/`Day`/`Warm`). Anything you write in
+the config (a `title`, a preset `name`, `on_text`, …) is shown exactly as written. The
+visual editor stays in English. The native app uses the same words. The standalone
+[kiosk page](#running-it-without-the-home-assistant-frontend) does not ask Home Assistant for
+a language, so it is always English.
+
 ## Why it isn't laggy
 
 - **No service calls during a drag.** The card moves a block with `translate3d` and the CSS
@@ -110,7 +123,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.13.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.14.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -398,7 +411,7 @@ the scene did not do what you expected.
 | `buttons` | — | up to 6; `entity` alone is the one-button shorthand |
 | `columns` | `2` | 1–3, capped at the number of buttons; a row is always shared by the buttons in it |
 | `confirm` | `false` | ask for a second tap; also settable per button |
-| `confirm_text` | `Tap again` | shown while it waits |
+| `confirm_text` | `Tap again` | shown while it waits; the default follows the [language](#language) |
 | `feedback_ms` | `1200` | how long the tick holds; `0` is no tick at all. Also settable per button, for a switch that answers with its own state |
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
@@ -516,8 +529,8 @@ greyed out and says so. A long-press opens more-info.
 | `echo_ms` | `1500` | how long the tap's state outranks Home Assistant's |
 | `show_name` | `true` | `false` hides the name; also settable per switch |
 | `show_state` | `true` | `false` hides the On/Off line; with both off the tile is the icon alone, lit while on |
-| `on_text` | `On` | the line under the name while on |
-| `off_text` | `Off` | the line under the name while off |
+| `on_text` | `On` | the line under the name while on; the default follows the [language](#language) |
+| `off_text` | `Off` | the line under the name while off; the default follows the [language](#language) |
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
@@ -807,7 +820,8 @@ entities:
 
 With `only_problems: true` the card shows nothing but what is wrong, and an all-clear when
 there is nothing — which makes it the fastest card on the panel to read. `columns` takes 1, 2
-or 3 across, the same as the button card; `all_clear` sets the text.
+or 3 across, the same as the button card; `all_clear` sets the text (by default "All clear" in
+the [language](#language)).
 
 Each row of tiles is 62 px plus a 10 px gap, inside the card's padding, so a 240 px card holds
 three rows: six entities at two across. Tiles that do not fit are cut off at the card's edge,
