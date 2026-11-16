@@ -47,7 +47,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.14.0';
+const NSPANEL_VERSION = '0.15.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -581,12 +581,29 @@ const SHEET_CSS = `
   font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #f2f4f7;
   --ns-accent: #ffb74a;
+  --ns-accent-strong: rgba(255,183,74,.62);
+  --ns-glow: rgba(255,183,74,.22);
+  --ns-halo: rgba(255,183,74,.18);
 }
 * { box-sizing: border-box; }
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+svg { display: block; fill: currentColor; }
+/* An opaque page, not a dialog: nothing of the dashboard shows through. The
+   accent glows in from the title's corner - one static gradient, painted once. */
 .scrim {
   position: absolute;
   inset: 0;
-  background: #0b0d10;
+  background: radial-gradient(140% 140% at 0% -20%, var(--ns-glow), rgba(11,13,16,0) 70%),
+    #0b0d10;
   opacity: 0;
   transition: opacity .16s linear;
 }
@@ -596,41 +613,45 @@ const SHEET_CSS = `
   inset: 0;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 10px 12px 18px 20px;
   gap: 14px;
   opacity: 0;
   transform: translate3d(0, 12px, 0);
   transition: opacity .18s linear, transform .18s cubic-bezier(.22,.61,.36,1);
 }
 .wrap.in { opacity: 1; transform: none; }
+
+/* the whole strip closes, not just the button at its end */
 .head {
   display: flex;
   align-items: center;
   gap: 12px;
   flex: none;
-}
-.title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; flex: 1; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.state { font-size: 15px; color: #98a1b0; font-weight: 500; }
-.x {
-  width: 56px; height: 56px; flex: none;
-  border: 0; border-radius: 18px;
-  background: rgba(255,255,255,.10);
-  color: #fff;
-  font-size: 26px; line-height: 1;
+  min-height: 80px;
   cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
-.x:active { transform: scale(.94); }
+.hl { flex: 1; min-width: 0; }
+.title, .state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.state { margin-top: 2px; font-size: 15px; font-weight: 600; color: var(--ns-accent); }
+.x {
+  width: 80px; height: 80px; flex: none;
+  border-radius: 50%;
+  background: rgba(242,244,247,.14);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .1s ease-out;
+}
+.x svg { width: 42px; height: 42px; }
+.x:active, .step:active, .act:active, .big:active .ring { transform: scale(.95); }
 
-.body { flex: 1; display: flex; gap: 14px; min-height: 0; }
+.body { flex: 1; display: flex; gap: 16px; min-height: 0; }
 .track {
   position: relative;
-  flex: 1;
-  border-radius: 24px;
+  flex: none;
+  width: clamp(120px, 31%, 200px);
+  border-radius: 44px;
   overflow: hidden;
-  background: rgba(255,255,255,.08);
+  background: rgba(242,244,247,.07);
   touch-action: none;
   cursor: pointer;
 }
@@ -638,70 +659,153 @@ const SHEET_CSS = `
   position: absolute;
   left: 0; right: 0; top: 0;
   height: 100%;
-  background: var(--ns-accent);
-  opacity: .8;
+  background: linear-gradient(to bottom, var(--ns-accent), var(--ns-accent-strong));
   transform: translate3d(0, calc((1 - var(--ns-fill, 0)) * 100%), 0);
   transition: transform .16s cubic-bezier(.22,.61,.36,1);
 }
 .track.dragging .tfill { transition: none; }
-.tfill.from-top { transform: translate3d(0, calc(var(--ns-fill, 0) * -100%), 0); }
-.tval {
-  position: absolute;
-  left: 0; right: 0; bottom: 18px;
-  text-align: center;
-  font-size: 46px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  pointer-events: none;
-  color: #ffffff;
-  text-shadow: 0 2px 8px rgba(0,0,0,.55);
+.tfill.from-top {
+  transform: translate3d(0, calc(var(--ns-fill, 0) * -100%), 0);
+  background: linear-gradient(to bottom, var(--ns-accent-strong), var(--ns-accent));
 }
-.steps { display: flex; flex-direction: column; gap: 14px; flex: none; width: 96px; }
+.grip {
+  position: absolute;
+  left: 50%; top: 14px;
+  width: 44px; height: 6px; margin-left: -22px;
+  border-radius: 3px;
+  background: rgba(11,13,16,.35);
+}
+.tfill.from-top .grip { top: auto; bottom: 14px; }
+
+.side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.tval {
+  flex: none;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  font-size: 68px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.steps {
+  flex: none;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  border-radius: 36px;
+  background: #1e232b;
+}
 .step {
   flex: 1;
-  border: 0;
-  border-radius: 22px;
-  background: rgba(255,255,255,.10);
-  color: #fff;
-  font-size: 34px;
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
+  height: 100%;
+  display: flex; align-items: center; justify-content: center;
   transition: transform .1s ease-out;
 }
-.step:active { transform: scale(.95); }
+.step svg { width: 36px; height: 36px; }
+.steps i { flex: none; width: 2px; height: 32px; background: rgba(242,244,247,.12); }
 
-.actions { display: flex; gap: 10px; flex: none; }
+/* up to three actions as full-width rows, four as a 2x2 of tiles */
+.actions {
+  flex: 1;
+  min-height: 0;
+  /* on a tall Pro 120 they would grow into slabs */
+  max-height: 300px;
+  display: grid;
+  gap: 10px;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+.actions.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: repeat(2, minmax(0, 1fr)); }
 .act {
-  flex: 1 1 0;
   min-width: 0;
-  height: 76px;
-  border: 0;
-  border-radius: 20px;
-  background: rgba(255,255,255,.10);
-  color: #fff;
-  font-family: inherit;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
+  border-radius: 24px;
+  background: #1e232b;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: left;
+  overflow: hidden;
+  transition: transform .1s ease-out;
+}
+.act span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act ha-icon { --mdc-icon-size: 26px; flex: none; }
+.actions.n4 .act, .actions.tiles .act {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0;
+  padding: 12px 10px 10px 14px;
+  font-size: 15px;
+}
+.actions.n4 .act ha-icon, .actions.tiles .act ha-icon { --mdc-icon-size: 28px; }
+.act.primary { background: var(--ns-accent); color: #0b0d10; }
+
+/* without a level: one big round button */
+.toggle { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.bigwrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.big {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  overflow: hidden;
-  padding: 0 6px;
+  gap: 14px;
+  font-size: 20px;
+  font-weight: 700;
+}
+.ring {
+  width: min(220px, 46vmin);
+  height: min(220px, 46vmin);
+  border-radius: 50%;
+  padding: 7%;
+  background: var(--ns-halo);
   transition: transform .1s ease-out;
 }
-.act:active { transform: scale(.95); }
-.act.primary { background: var(--ns-accent); color: #14161a; }
-.act ha-icon { --mdc-icon-size: 28px; }
+.core {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: var(--ns-accent);
+  color: #0b0d10;
+  display: flex; align-items: center; justify-content: center;
+}
+.core ha-icon { --mdc-icon-size: 80px; }
+.big.off .ring { background: #16191f; }
+.big.off .core { background: #1e232b; color: #98a1b0; }
+.bigstate { font-size: 44px; font-weight: 700; text-align: center; }
+.toggle .actions {
+  flex: none;
+  height: 80px;
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
 `;
+
+const SVG_CLOSE = '<svg viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+const SVG_ADD = '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>';
+const SVG_REMOVE = '<svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>';
+
+/* Untouched this long, the sheet closes itself. The app's panel setting
+   `popup_timeout` is the same idea; 30 s is its default. */
+const SHEET_TIMEOUT_MS = 30000;
+
+/* `color` with an alpha, for a hex or an rgb() colour; null for anything else
+   (a CSS name), where the caller keeps its fallback. */
+function rgbaOf(color, alpha) {
+  const c = String(color || '').trim();
+  let m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c);
+  if (m) {
+    const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1];
+    const n = parseInt(h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+  }
+  m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(c);
+  return m ? `rgba(${m[1]},${m[2]},${m[3]},${alpha})` : null;
+}
 
 class NsSheet extends HTMLElement {
   constructor() {
@@ -711,36 +815,53 @@ class NsSheet extends HTMLElement {
       <style>${SHEET_CSS}</style>
       <div class="scrim"></div>
       <div class="wrap">
-        <div class="head">
-          <div style="flex:1;min-width:0">
+        <div class="head" role="button">
+          <div class="hl">
             <div class="title"></div>
             <div class="state"></div>
           </div>
-          <button class="x" aria-label="Close">&#10005;</button>
+          <button class="x" aria-label="Close">${SVG_CLOSE}</button>
         </div>
         <div class="body">
-          <div class="track"><div class="tfill"></div><div class="tval"></div></div>
-          <div class="steps">
-            <button class="step up" aria-label="Increase">+</button>
-            <button class="step down" aria-label="Decrease">&minus;</button>
+          <div class="track"><div class="tfill"><div class="grip"></div></div></div>
+          <div class="side">
+            <div class="tval"></div>
+            <div class="steps">
+              <button class="step down" aria-label="Decrease">${SVG_REMOVE}</button>
+              <i></i>
+              <button class="step up" aria-label="Increase">${SVG_ADD}</button>
+            </div>
           </div>
         </div>
-        <div class="actions"></div>
+        <div class="toggle">
+          <div class="bigwrap">
+            <button class="big"><span class="ring"><span class="core"><ha-icon></ha-icon></span></span><span class="blabel"></span></button>
+            <div class="bigstate"></div>
+          </div>
+        </div>
       </div>
     `;
-    this._scrim = this.shadowRoot.querySelector('.scrim');
-    this._wrap = this.shadowRoot.querySelector('.wrap');
-    this._title = this.shadowRoot.querySelector('.title');
-    this._state = this.shadowRoot.querySelector('.state');
-    this._track = this.shadowRoot.querySelector('.track');
-    this._tfill = this.shadowRoot.querySelector('.tfill');
-    this._tval = this.shadowRoot.querySelector('.tval');
-    this._actions = this.shadowRoot.querySelector('.actions');
-    this._body = this.shadowRoot.querySelector('.body');
-    this._binaryState = document.createElement('div');
-    this._binaryState.style.cssText = 'flex:1;display:none;align-items:center;justify-content:center;font-size:36px;font-weight:700';
-    this._body.after(this._binaryState);
+    const $ = (q) => this.shadowRoot.querySelector(q);
+    this._scrim = $('.scrim');
+    this._wrap = $('.wrap');
+    this._head = $('.head');
+    this._title = $('.title');
+    this._state = $('.state');
+    this._body = $('.body');
+    this._side = $('.side');
+    this._track = $('.track');
+    this._tfill = $('.tfill');
+    this._tval = $('.tval');
+    this._toggle = $('.toggle');
+    this._big = $('.big');
+    this._bigIcon = $('.core ha-icon');
+    this._bigLabel = $('.blabel');
+    this._bigState = $('.bigstate');
+    this._actions = document.createElement('div');
+    this._actions.className = 'actions';
+    this._side.append(this._actions);
     this._trackActive = false;
+    this._held = 0;
 
     // Opened from a tap, the sheet is on screen before that tap's click is
     // delivered, and the click would land on whatever is now under the finger.
@@ -750,22 +871,36 @@ class NsSheet extends HTMLElement {
         e.preventDefault();
       }
     }, true);
-    this.shadowRoot.querySelector('.x').addEventListener('click', () => this.close());
+    // every touch starts the auto-close count again; a finger held down (on
+    // the slider, mid-drag) stops it until it lifts
+    this.addEventListener('pointerdown', () => {
+      this._held++;
+      clearTimeout(this._autoTimer);
+    }, true);
+    const lifted = () => {
+      this._held = Math.max(0, this._held - 1);
+      this._armAuto();
+    };
+    this.addEventListener('pointerup', lifted, true);
+    this.addEventListener('pointercancel', lifted, true);
+
+    this._head.addEventListener('click', () => this.close());
     this._scrim.addEventListener('click', () => this.close());
-    this.shadowRoot.querySelector('.up')
-      .addEventListener('click', () => this._step(+this._opts.step));
-    this.shadowRoot.querySelector('.down')
-      .addEventListener('click', () => this._step(-this._opts.step));
+    $('.up').addEventListener('click', () => this._step(+this._opts.step));
+    $('.down').addEventListener('click', () => this._step(-this._opts.step));
+    this._big.addEventListener('click', () => this._run(this._bigAction));
 
     this._bindTrack();
   }
 
-  /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
-            actions:[{label, icon, primary, run}] } */
+  /* opts: {title, state, value 0..1, fromTop, step, accent, showLevel, enabled,
+            active (no level: whether it is on), onInput(v), onCommit(v),
+            actions:[{label, icon, primary, enabled, close, run}] } */
   open(opts) {
     clearTimeout(this._closeTimer);
     if (this._opts && this._opts.onClose) this._opts.onClose();
     this._trackActive = false;
+    this._held = 0;
     this._openedAt = performance.now();
     this.update(opts);
 
@@ -774,6 +909,7 @@ class NsSheet extends HTMLElement {
       this.style.position = host === document.body ? 'fixed' : 'absolute';
       host.appendChild(this);
     }
+    this._armAuto();
     // one frame so the transition has a starting point to run from
     requestAnimationFrame(() => {
       this._scrim.classList.add('in');
@@ -784,49 +920,77 @@ class NsSheet extends HTMLElement {
   update(opts) {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a',
       showLevel: true, enabled: true }, opts);
-    this.style.setProperty('--ns-accent', cssColor(this._opts.accent));
+    const o = this._opts;
+    const accent = cssColor(o.accent);
+    this.style.setProperty('--ns-accent', accent);
+    this.style.setProperty('--ns-accent-strong', rgbaOf(accent, .62) || accent);
+    this.style.setProperty('--ns-glow', rgbaOf(accent, .22) || 'rgba(0,0,0,0)');
+    this.style.setProperty('--ns-halo', rgbaOf(accent, .18) || '#16191f');
     // a singleton shared by every card, so the card opening it says the language
-    const lang = this._opts.lang;
+    const lang = o.lang;
     this.shadowRoot.querySelector('.x').setAttribute('aria-label', tr(lang, 'close'));
     this.shadowRoot.querySelector('.up').setAttribute('aria-label', tr(lang, 'increase'));
     this.shadowRoot.querySelector('.down').setAttribute('aria-label', tr(lang, 'decrease'));
-    this._title.textContent = opts.title || '';
-    this._state.textContent = opts.state || '';
-    this._binaryState.textContent = opts.state || '';
-    this._body.style.display = this._opts.showLevel ? '' : 'none';
-    this._binaryState.style.display = this._opts.showLevel ? 'none' : 'flex';
-    this._body.style.opacity = this._opts.enabled ? '' : '.45';
-    this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
-    if (!this._opts.enabled || !this._opts.showLevel) {
+    this._title.textContent = o.title || '';
+    this._state.textContent = o.state || '';
+    this._body.style.display = o.showLevel ? '' : 'none';
+    this._toggle.style.display = o.showLevel ? 'none' : '';
+    this._body.style.opacity = o.enabled ? '' : '.45';
+    this._tfill.classList.toggle('from-top', !!o.fromTop);
+    if (!o.enabled || !o.showLevel) {
       this._trackActive = false;
       this._track.classList.remove('dragging');
     }
-    this._body.querySelectorAll('.step').forEach((b) => { b.disabled = !this._opts.enabled; });
-    if (!this._trackActive) this.setValue(opts.value);
-    const actions = opts.actions || [];
-    while (this._actions.children.length > actions.length) this._actions.lastChild.remove();
-    actions.forEach((a, i) => {
+    this._body.querySelectorAll('.step').forEach((b) => { b.disabled = !o.enabled; });
+    if (!this._trackActive) this.setValue(o.value);
+
+    const all = (o.actions || []).slice(0, 4);
+    // without a level the primary action is the big button; the rest are tiles
+    const big = o.showLevel ? null : all.find((a) => a.primary) || null;
+    const list = all.filter((a) => a !== big);
+    this._bigAction = big;
+    if (!o.showLevel) {
+      this._big.style.display = big ? '' : 'none';
+      this._bigState.style.display = big ? 'none' : '';
+      this._bigState.textContent = o.state || '';
+      if (big) {
+        this._big.classList.toggle('off', o.active === false);
+        this._big.disabled = !o.enabled || big.enabled === false;
+        this._big.style.opacity = this._big.disabled ? '.4' : '';
+        this._bigIcon.setAttribute('icon', big.icon || 'mdi:power');
+        this._bigLabel.textContent = big.label;
+      }
+    }
+    // the one actions element moves to where this mode draws it
+    const home = o.showLevel ? this._side : this._toggle;
+    if (this._actions.parentNode !== home) home.append(this._actions);
+    this._actions.className = 'actions' + (list.length === 4 ? ' n4' : '') +
+      (o.showLevel ? '' : ' tiles');
+    while (this._actions.children.length > list.length) this._actions.lastChild.remove();
+    list.forEach((a, i) => {
       let b = this._actions.children[i];
       if (!b) {
         b = document.createElement('button');
         b.append(document.createElement('ha-icon'), document.createElement('span'));
-        b.addEventListener('click', () => {
-          const current = this._opts.actions[i];
-          if (!this._opts.enabled || current.enabled === false) return;
-          haptic(this, 'light');
-          current.run();
-          if (current.close !== false) this.close();
-        });
+        b.addEventListener('click', () => this._run(b._action));
         this._actions.appendChild(b);
       }
+      b._action = a;
       b.className = 'act' + (a.primary ? ' primary' : '');
-      b.disabled = !this._opts.enabled || a.enabled === false;
+      b.disabled = !o.enabled || a.enabled === false;
       b.style.opacity = b.disabled ? '.35' : '';
       b.firstChild.setAttribute('icon', a.icon || '');
       b.firstChild.style.display = a.icon ? '' : 'none';
       b.lastChild.textContent = a.label;
     });
-    this._actions.style.display = actions.length ? '' : 'none';
+    this._actions.style.display = list.length ? '' : 'none';
+  }
+
+  _run(a) {
+    if (!a || !this._opts.enabled || a.enabled === false) return;
+    haptic(this, 'light');
+    a.run();
+    if (a.close !== false) this.close();
   }
 
   setValue(v) {
@@ -838,12 +1002,19 @@ class NsSheet extends HTMLElement {
 
   close() {
     clearTimeout(this._closeTimer);
+    clearTimeout(this._autoTimer);
     this._trackActive = false;
     if (this._opts && this._opts.onClose) this._opts.onClose();
     this._scrim.classList.remove('in');
     this._wrap.classList.remove('in');
     const done = () => { if (this.parentNode) this.parentNode.removeChild(this); };
     this._closeTimer = setTimeout(done, 200);
+  }
+
+  _armAuto() {
+    clearTimeout(this._autoTimer);
+    if (this._held > 0 || !this.parentNode) return;
+    this._autoTimer = setTimeout(() => this.close(), SHEET_TIMEOUT_MS);
   }
 
   _step(delta) {
@@ -1413,6 +1584,7 @@ class NsPanelLightCard extends NsBaseCard {
       state: this._t(isBroken(s) ? 'unavailable' : (isOn(s) ? 'on' : 'off')),
       lang: this._lang,
       showLevel: this._canDrag(),
+      active: isOn(s),
       enabled: !isBroken(s),
       onClose: () => { this._sheetOpen = false; },
       value: this._displayValue(),

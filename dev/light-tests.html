@@ -93,11 +93,11 @@ async function run() {
     setState(state(['onoff'], 'off'));
     await pause();
     assert(sheet()._state.textContent === 'Off', 'stale dialog state');
-    assert(sheet()._actions.lastChild.textContent === 'Turn on', 'stale action');
+    assert(sheet()._bigLabel.textContent === 'Turn on', 'stale action');
     setState(state(['onoff'], 'unavailable'));
     await pause();
     assert(sheet()._state.textContent === 'Unavailable', 'missing unavailable state');
-    assert(sheet()._actions.lastChild.disabled, 'action remains enabled');
+    assert(sheet()._big.disabled, 'action remains enabled');
     card._commit(.5); card._onTap(); card._applyPreset({ scene: 'scene.evening' });
     assert(calls.length === 0, 'stale action bypassed guard');
   });

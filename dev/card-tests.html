@@ -82,14 +82,14 @@ async function run() {
     sheet().close = function () { closes++; return close.call(this); };
     card._onTap();
     await wait(30);
-    sheet()._scrim.click();
+    sheet()._head.click();
     await wait(30);
     assert(closes === 0, 'the opening click closed the sheet');
     await wait(400);
-    sheet()._scrim.click();
+    sheet()._head.click();
     await wait(30);
     delete sheet().close;
-    assert(closes === 1, 'a later tap outside should close it');
+    assert(closes === 1, 'a later tap on the title strip should close it');
   });
   await test('media tap defaults to play/pause, more_info still means the dialog', async () => {
     await mount('nspanel-media-card', {entity:'media_player.m'});

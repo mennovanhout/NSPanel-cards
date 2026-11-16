@@ -72,10 +72,10 @@ It starts with installing these cards.
 | --- | --- |
 | **Tap** | Toggle. On a moving cover, stop. |
 | **Drag up / down** | Adjust, relative to the current value. The full card height is the full range. |
-| **Long-press** (500 ms) | Full-screen control: an absolute slider, big ± steps, preset and action buttons. |
+| **Long-press** (500 ms) | Full-screen control: a tall slider you drag or tap anywhere on, the value in large type, one − / + button, and the presets and actions as big buttons. A big round close button at the top; tapping anywhere on the title strip closes it too, and it closes itself after 30 seconds untouched. |
 | **Drag sideways** | Released back to the page, so a swipe card still changes page. |
 
-<img src="docs/images/sheet.png" alt="The long-press control: a full-screen absolute slider at 68%, big plus and minus buttons, preset buttons and a turn-off button" width="300">
+<img src="docs/images/sheet.png" alt="The long-press control: a tall amber slider at 68% on the left; on the right 68% in large type, a minus and plus button, and Low, Dinner, Full and Turn off as tiles; a round close button top right" width="300">
 
 Gestures apply to the control cards. The information cards are read-only: a tap opens HA's
 more-info dialog, which is where history and settings already live.
@@ -123,7 +123,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.14.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.15.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -174,7 +174,7 @@ That is the card at the top of the picture; below it is a second one with
 
 The same card also renders relay lights. It reads HA's `supported_color_modes`:
 on/off lights show their state without percentages, a brightness drag or the default
-brightness presets. Long-press opens a state and on/off dialog. No extra YAML is needed.
+brightness presets. Long-press opens a page with one big round on/off button. No extra YAML is needed.
 Dimmable lights keep their controls when switched off, even if HA omits current brightness.
 Missing, empty or unrecognized mode information falls back to on/off controls; an active
 `color_mode: onoff` effect temporarily disables brightness and color adjustments.
@@ -187,7 +187,7 @@ controls. The dialog follows external state and capability changes. Opening, dis
 cancelling a gesture sends no command.
 
 <img src="docs/images/light-onoff.png" alt="An on/off light without a percentage or brightness presets" width="240">
-<img src="docs/images/light-onoff-sheet.png" alt="The on/off detail dialog without a brightness slider" width="240">
+<img src="docs/images/light-onoff-sheet.png" alt="The on/off control for a light without brightness: one big round amber power button labelled Turn off" width="240">
 
 #### The card takes the light's colour
 
